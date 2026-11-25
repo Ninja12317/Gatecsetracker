@@ -1,0 +1,74 @@
+{
+  "id": "/",
+  "name": "GATE '27 — CSE War Room by Nihal Pawar",
+  "short_name": "GATE '27",
+  "description": "70-Day GATE CSE 2027 Study Tracker, GateR PYQ Studio, Mock Analytics & Deep-Work Focus Timer",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FAF8F4",
+  "theme_color": "#6E261A",
+  "categories": ["education", "productivity", "study"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Start Focus Timer",
+      "short_name": "Focus",
+      "description": "Jump straight to the Deep-Work Focus Studio and 70-day heatmap",
+      "url": "/?tab=focus",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "PYQ Studio",
+      "short_name": "PYQs",
+      "description": "Launch GateR PYQ tests, CBT simulator, and HTML5 Sketchpad",
+      "url": "/?tab=pyq",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Mock Logs",
+      "short_name": "Mocks",
+      "description": "Paste GO Classes results and inspect mock analytics",
+      "url": "/?tab=mocks",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

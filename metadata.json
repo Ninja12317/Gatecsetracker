@@ -1,0 +1,6 @@
+{
+  "name": "GATE '27 // WAR ROOM",
+  "description": "70-day GATE CSE 2027 study tracker, PYQ practice studio, rough-work sketchpad, and revision command center built by Nihal Pawar.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

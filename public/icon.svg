@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="GATE CSE 2027 App Icon">
+  <defs>
+    <radialGradient id="cocoaGlow" cx="50%" cy="32%" r="72%">
+      <stop offset="0%" stop-color="#6E261A" stop-opacity="0.72" />
+      <stop offset="58%" stop-color="#361812" stop-opacity="0.92" />
+      <stop offset="100%" stop-color="#1F1511" stop-opacity="1" />
+    </radialGradient>
+    <radialGradient id="goldAura" cx="50%" cy="42%" r="36%">
+      <stop offset="0%" stop-color="#E5B23A" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#E5B23A" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="goldStroke" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F0C75E" />
+      <stop offset="50%" stop-color="#C89216" />
+      <stop offset="100%" stop-color="#E5B23A" />
+    </linearGradient>
+    <linearGradient id="ivoryArch" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFDF9" />
+      <stop offset="100%" stop-color="#E8DDD0" />
+    </linearGradient>
+  </defs>
+
+  <!-- Opaque Solid Square Canvas (Zero Transparency) -->
+  <rect x="0" y="0" width="512" height="512" fill="#1F1511" />
+  <rect x="0" y="0" width="512" height="512" fill="url(#cocoaGlow)" />
+  <rect x="0" y="0" width="512" height="512" fill="url(#goldAura)" />
+
+  <!-- Subtle Inner Imperial Gold Hairline Architectural Border -->
+  <rect
+    x="28"
+    y="28"
+    width="456"
+    height="456"
+    rx="44"
+    fill="none"
+    stroke="url(#goldStroke)"
+    stroke-width="2.5"
+    stroke-opacity="0.58"
+  />
+  <rect
+    x="40"
+    y="40"
+    width="432"
+    height="432"
+    rx="34"
+    fill="none"
+    stroke="#C89216"
+    stroke-width="1"
+    stroke-opacity="0.22"
+  />
+
+  <!-- Center Geometric CS Crest (Strictly Inside 70% Safe Zone: 77..435) -->
+  <g transform="translate(0, 4)">
+    <!-- Architectural GATE Archway formed from Logic-Gate Pillars -->
+    <!-- Outer Archway Frame -->
+    <path
+      d="M 152 316 L 152 214 C 152 146 198 106 256 106 C 314 106 360 146 360 214 L 360 316"
+      fill="none"
+      stroke="url(#ivoryArch)"
+      stroke-width="15"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+
+    <!-- Inner Gold Architectural Arch Accent -->
+    <path
+      d="M 176 316 L 176 216 C 176 164 212 132 256 132 C 300 132 336 164 336 216 L 336 316"
+      fill="none"
+      stroke="url(#goldStroke)"
+      stroke-width="4"
+      stroke-linecap="round"
+      stroke-opacity="0.88"
+    />
+
+    <!-- Threshold Baseline Bus -->
+    <line
+      x1="126"
+      y1="316"
+      x2="386"
+      y2="316"
+      stroke="url(#ivoryArch)"
+      stroke-width="10"
+      stroke-linecap="round"
+    />
+
+    <!-- Logic-Gate / Binary Tree Circuit Inside Archway -->
+    <!-- Root to Left & Right Branches -->
+    <path
+      d="M 256 172 L 210 234 L 210 278"
+      fill="none"
+      stroke="url(#goldStroke)"
+      stroke-width="6.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <path
+      d="M 256 172 L 302 234 L 302 278"
+      fill="none"
+      stroke="url(#goldStroke)"
+      stroke-width="6.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <!-- Center Logic Bus Stem -->
+    <line
+      x1="256"
+      y1="172"
+      x2="256"
+      y2="292"
+      stroke="#FAF8F4"
+      stroke-width="5.5"
+      stroke-linecap="round"
+      stroke-opacity="0.92"
+    />
+    <!-- Crossbar Connector -->
+    <line
+      x1="210"
+      y1="234"
+      x2="302"
+      y2="234"
+      stroke="#FAF8F4"
+      stroke-width="4.5"
+      stroke-linecap="round"
+      stroke-opacity="0.72"
+    />
+
+    <!-- Keystone Apex Node (Gold) -->
+    <circle cx="256" cy="106" r="14" fill="#1F1511" stroke="url(#goldStroke)" stroke-width="6" />
+    <circle cx="256" cy="106" r="5" fill="#FAF8F4" />
+
+    <!-- Binary Tree Root Node -->
+    <circle cx="256" cy="172" r="13" fill="#E5B23A" stroke="#1F1511" stroke-width="4" />
+
+    <!-- Binary Tree Left & Right Nodes -->
+    <circle cx="210" cy="234" r="10.5" fill="#FAF8F4" stroke="#1F1511" stroke-width="3.5" />
+    <circle cx="302" cy="234" r="10.5" fill="#FAF8F4" stroke="#1F1511" stroke-width="3.5" />
+
+    <!-- Terminal Circuit Pads -->
+    <rect x="202" y="274" width="16" height="16" rx="4" fill="#E5B23A" />
+    <rect x="294" y="274" width="16" height="16" rx="4" fill="#E5B23A" />
+    <circle cx="256" cy="292" r="7.5" fill="#FAF8F4" />
+
+    <!-- Pillar Base Pads -->
+    <circle cx="152" cy="316" r="7" fill="#E5B23A" />
+    <circle cx="360" cy="316" r="7" fill="#E5B23A" />
+
+    <!-- Subtle Gold Accent Divider -->
+    <line
+      x1="168"
+      y1="344"
+      x2="344"
+      y2="344"
+      stroke="url(#goldStroke)"
+      stroke-width="2"
+      stroke-opacity="0.6"
+    />
+
+    <!-- Crisp Minimal CSE '27 Micro-Typography inside safe zone -->
+    <text
+      x="256"
+      y="394"
+      text-anchor="middle"
+      font-family="Plus Jakarta Sans, Inter, system-ui, -apple-system, sans-serif"
+      font-weight="800"
+      font-size="46"
+      letter-spacing="5"
+      fill="#FAF8F4"
+    >
+      CSE <tspan fill="#E5B23A">&apos;27</tspan>
+    </text>
+  </g>
+</svg>

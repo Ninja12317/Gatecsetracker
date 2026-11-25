@@ -1,0 +1,734 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Pillar 0: Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ==================== GLOBAL PRIMITIVES ====================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function parentUserExists(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId));
+    }
+
+    function isValidSubjectId(subjectId) {
+      return subjectId is string && subjectId in ['ga', 'em', 'dl', 'coa', 'pds', 'algo', 'toc', 'cd', 'os', 'dbms', 'cn'];
+    }
+
+    function isValidMockSubjectId(subjectId) {
+      return subjectId is string && subjectId in ['all', 'ga', 'em', 'dl', 'coa', 'pds', 'algo', 'toc', 'cd', 'os', 'dbms', 'cn'];
+    }
+
+    function isValidStringList(arr, maxLen) {
+      return arr is list
+        && arr.size() <= maxLen
+        && (arr.size() == 0 || (arr[0] is string && arr[0].size() <= 128));
+    }
+
+    function isOptionalBoundedNumber(data, field, minVal, maxVal) {
+      return !(field in data) || (data[field] is number && data[field] >= minVal && data[field] <= maxVal);
+    }
+
+    function isOptionalBool(data, field) {
+      return !(field in data) || data[field] is bool;
+    }
+
+    // ==================== ENTITY VALIDATION BLUEPRINTS ====================
+
+    function isValidUserRoot(data, userId) {
+      return data.keys().hasAll(['ownerId', 'displayName', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'displayName', 'createdAt', 'updatedAt'])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && isValidId(data.ownerId)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWorkspaceMeta(data, userId) {
+      return data.keys().hasAll([
+          'ownerId', 'theme', 'targetDateIso', 'shift', 'dailyGoalMinutes',
+          'lastAutopilotIstDate', 'bookmarkedQuestions', 'bookmarkedTips', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'theme', 'themeMode', 'uiScale', 'contentWidth',
+          'targetDateIso', 'shift', 'dailyGoalMinutes',
+          'pomodoroWorkMinutes', 'pomodoroShortBreakMinutes', 'pomodoroLongBreakMinutes',
+          'timerChimeEnabled', 'autoHideRemoved2027', 'autoAddWrongToMistakes',
+          'showLivePaceTimer', 'enableKeyboardShortcuts',
+          'lastAutopilotIstDate', 'lastTrapsIstDate',
+          'bookmarkedQuestions', 'bookmarkedTips', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && isValidId(data.ownerId)
+        && data.theme in ['light', 'dark']
+        && (!('themeMode' in data) || data.themeMode in ['light', 'dark', 'system'])
+        && (!('uiScale' in data) || data.uiScale in ['compact', 'default', 'comfortable'])
+        && (!('contentWidth' in data) || data.contentWidth in ['focused', 'wide'])
+        && data.targetDateIso is string && data.targetDateIso.size() >= 10 && data.targetDateIso.size() <= 40
+        && data.shift in ['Forenoon (09:30 IST)', 'Afternoon (14:30 IST)']
+        && data.dailyGoalMinutes is number && data.dailyGoalMinutes >= 30 && data.dailyGoalMinutes <= 720
+        && isOptionalBoundedNumber(data, 'pomodoroWorkMinutes', 5, 180)
+        && isOptionalBoundedNumber(data, 'pomodoroShortBreakMinutes', 1, 60)
+        && isOptionalBoundedNumber(data, 'pomodoroLongBreakMinutes', 5, 90)
+        && isOptionalBool(data, 'timerChimeEnabled')
+        && isOptionalBool(data, 'autoHideRemoved2027')
+        && isOptionalBool(data, 'autoAddWrongToMistakes')
+        && isOptionalBool(data, 'showLivePaceTimer')
+        && isOptionalBool(data, 'enableKeyboardShortcuts')
+        && data.lastAutopilotIstDate is string && data.lastAutopilotIstDate.size() <= 16
+        && (!('lastTrapsIstDate' in data) || (data.lastTrapsIstDate is string && data.lastTrapsIstDate.size() <= 16))
+        && isValidStringList(data.bookmarkedQuestions, 200)
+        && isValidStringList(data.bookmarkedTips, 200)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSubtopicProgress(data, userId, subtopicId) {
+      return data.keys().hasAll(['ownerId', 'subtopicId', 'status', 'confidence', 'lastRevisedAt', 'notes', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'subtopicId', 'status', 'confidence', 'lastRevisedAt', 'notes', 'updatedAt'])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && data.subtopicId == subtopicId
+        && isValidId(data.subtopicId)
+        && data.status in ['not_started', 'concept_done', 'pyqs_done', 'mastered']
+        && data.confidence is number && data.confidence >= 1 && data.confidence <= 5
+        && data.lastRevisedAt is string && data.lastRevisedAt.size() <= 40
+        && data.notes is string && data.notes.size() <= 4000
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidStudyLog(data, userId) {
+      return data.keys().hasAll(['ownerId', 'date', 'subjectId', 'minutes', 'mode', 'completedAt', 'createdAt'])
+        && data.keys().hasOnly([
+          'ownerId', 'date', 'subjectId', 'minutes', 'mode', 'completedAt',
+          'startedAt', 'sessionType', 'goal', 'resumeNote', 'distractions', 'presetLabel',
+          'createdAt', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && data.date is string && data.date.size() == 10 && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && isValidSubjectId(data.subjectId)
+        && data.minutes is number && data.minutes >= 1 && data.minutes <= 720
+        && data.mode in ['pomodoro', 'stopwatch']
+        && data.completedAt is string && data.completedAt.size() <= 40
+        && (!('startedAt' in data) || (data.startedAt is string && data.startedAt.size() <= 40))
+        && (!('sessionType' in data) || data.sessionType in ['Concept', 'PYQs', 'Mock Analysis', 'Revision'])
+        && (!('goal' in data) || (data.goal is string && data.goal.size() <= 200))
+        && (!('resumeNote' in data) || (data.resumeNote is string && data.resumeNote.size() <= 300))
+        && isOptionalBoundedNumber(data, 'distractions', 0, 500)
+        && (!('presetLabel' in data) || (data.presetLabel is string && data.presetLabel.size() <= 64))
+        && data.createdAt is timestamp
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidQuestionAttempt(data, userId, questionId) {
+      return data.keys().hasAll(['ownerId', 'questionId', 'isCorrect', 'marksAwarded', 'maxMarks', 'attemptedAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'questionId', 'isCorrect', 'marksAwarded', 'maxMarks', 'attemptedAt', 'selectedAnswer', 'updatedAt'])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && data.questionId == questionId
+        && isValidId(data.questionId)
+        && data.isCorrect is bool
+        && data.marksAwarded is number && data.marksAwarded >= -2 && data.marksAwarded <= 2
+        && data.maxMarks is number && (data.maxMarks == 1 || data.maxMarks == 2)
+        && data.attemptedAt is string && data.attemptedAt.size() <= 40
+        && (!('selectedAnswer' in data) || (data.selectedAnswer is string && data.selectedAnswer.size() <= 120))
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMistakeEntry(data, userId, questionId) {
+      return data.keys().hasAll(['ownerId', 'questionId', 'errorTag', 'wrongCount', 'lastAttemptedAt', 'resolved', 'userNote', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'questionId', 'errorTag', 'wrongCount', 'lastAttemptedAt', 'resolved', 'userNote', 'updatedAt'])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && data.questionId == questionId
+        && isValidId(data.questionId)
+        && data.errorTag in ['Conceptual Gap', 'Silly Math', 'MSQ Trap', 'Time Pressure']
+        && data.wrongCount is number && data.wrongCount >= 0 && data.wrongCount <= 1000
+        && data.lastAttemptedAt is string && data.lastAttemptedAt.size() <= 40
+        && data.resolved is bool
+        && data.userNote is string && data.userNote.size() <= 2000
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSavedSketch(data, userId, questionId) {
+      return data.keys().hasAll(['ownerId', 'questionId', 'dataUrl', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'questionId', 'dataUrl', 'updatedAt'])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && data.questionId == questionId
+        && isValidId(data.questionId)
+        && data.dataUrl is string
+        && data.dataUrl.size() >= 22
+        && data.dataUrl.size() <= 450000
+        && data.dataUrl.matches('^data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$')
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMockTest(data, userId) {
+      return data.keys().hasAll(['ownerId', 'name', 'source', 'date', 'type', 'score', 'maxScore', 'accuracy', 'unattempted', 'notes', 'createdAt'])
+        && data.keys().hasOnly([
+          'ownerId', 'name', 'source', 'subjectId', 'date', 'type',
+          'score', 'maxScore', 'normalizedScore', 'percentage', 'accuracy',
+          'totalQuestions', 'attempted', 'correct', 'wrong', 'unattempted',
+          'q1Attempted', 'q2Attempted', 'q1Correct', 'q2Correct', 'q1Wrong', 'q2Wrong', 'q1Total', 'q2Total',
+          'positiveMarks', 'penaltyMarks', 'q1PositiveMarks', 'q2PositiveMarks', 'q1PenaltyMarks', 'q2PenaltyMarks',
+          'durationMinutes', 'timeTakenMinutes', 'rank', 'totalCandidates', 'percentile', 'parseSource',
+          'notes', 'createdAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && data.name is string && data.name.size() >= 3 && data.name.size() <= 160
+        && data.source is string && data.source.size() >= 1 && data.source.size() <= 120
+        && (!('subjectId' in data) || isValidMockSubjectId(data.subjectId))
+        && data.date is string && data.date.size() == 10 && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.type in ['Full-Length Mock', 'Subject Test', 'Topic-Wise Test']
+        && data.score is number && data.score >= -100 && data.score <= 300
+        && data.maxScore is number && data.maxScore >= 1 && data.maxScore <= 300
+        && isOptionalBoundedNumber(data, 'normalizedScore', -100, 100)
+        && isOptionalBoundedNumber(data, 'percentage', -100, 100)
+        && data.accuracy is number && data.accuracy >= 0 && data.accuracy <= 100
+        && isOptionalBoundedNumber(data, 'totalQuestions', 0, 300)
+        && isOptionalBoundedNumber(data, 'attempted', 0, 300)
+        && isOptionalBoundedNumber(data, 'correct', 0, 300)
+        && isOptionalBoundedNumber(data, 'wrong', 0, 300)
+        && data.unattempted is number && data.unattempted >= 0 && data.unattempted <= 300
+        && isOptionalBoundedNumber(data, 'q1Attempted', 0, 200)
+        && isOptionalBoundedNumber(data, 'q2Attempted', 0, 200)
+        && isOptionalBoundedNumber(data, 'q1Correct', 0, 200)
+        && isOptionalBoundedNumber(data, 'q2Correct', 0, 200)
+        && isOptionalBoundedNumber(data, 'q1Wrong', 0, 200)
+        && isOptionalBoundedNumber(data, 'q2Wrong', 0, 200)
+        && isOptionalBoundedNumber(data, 'q1Total', 0, 200)
+        && isOptionalBoundedNumber(data, 'q2Total', 0, 200)
+        && isOptionalBoundedNumber(data, 'positiveMarks', 0, 300)
+        && isOptionalBoundedNumber(data, 'penaltyMarks', 0, 150)
+        && isOptionalBoundedNumber(data, 'q1PositiveMarks', 0, 200)
+        && isOptionalBoundedNumber(data, 'q2PositiveMarks', 0, 300)
+        && isOptionalBoundedNumber(data, 'q1PenaltyMarks', 0, 150)
+        && isOptionalBoundedNumber(data, 'q2PenaltyMarks', 0, 150)
+        && isOptionalBoundedNumber(data, 'durationMinutes', 0, 600)
+        && isOptionalBoundedNumber(data, 'timeTakenMinutes', 0, 600)
+        && isOptionalBoundedNumber(data, 'rank', 1, 500000)
+        && isOptionalBoundedNumber(data, 'totalCandidates', 1, 500000)
+        && isOptionalBoundedNumber(data, 'percentile', 0, 100)
+        && (!('parseSource' in data) || data.parseSource in ['local_deterministic', 'ai_free_tier', 'manual'])
+        && data.notes is string && data.notes.size() <= 2000
+        && data.createdAt is timestamp;
+    }
+
+    function isValidCustomTip(data, userId) {
+      return data.keys().hasAll(['ownerId', 'subjectId', 'title', 'category', 'summary', 'detail', 'formula', 'sourceUrl', 'createdAt'])
+        && data.keys().hasOnly(['ownerId', 'subjectId', 'title', 'category', 'summary', 'detail', 'formula', 'sourceUrl', 'createdAt'])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && isValidSubjectId(data.subjectId)
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 180
+        && data.category in ['Exam Trap', 'Formula', 'Shortcut', 'Edge Case']
+        && data.summary is string && data.summary.size() <= 400
+        && data.detail is string && data.detail.size() >= 5 && data.detail.size() <= 3000
+        && data.formula is string && data.formula.size() <= 400
+        && data.sourceUrl is string && data.sourceUrl.size() <= 500
+        && data.createdAt is timestamp;
+    }
+
+    function isValidPyqQuestion(data, userId) {
+      return data.keys().hasAll([
+          'ownerId', 'subjectId', 'subtopic', 'format', 'marks', 'difficulty',
+          'sourceTag', 'sourceUrl', 'prompt', 'codeSnippet', 'options',
+          'correctOption', 'correctOptions', 'natAnswer', 'natTolerance', 'natUnit',
+          'explanation', 'wrongOptionAnalysis', 'fingerprint', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'subjectId', 'subtopic', 'format', 'marks', 'difficulty',
+          'sourceTag', 'sourceUrl', 'prompt', 'codeSnippet', 'options',
+          'correctOption', 'correctOptions', 'natAnswer', 'natTolerance', 'natUnit',
+          'explanation', 'wrongOptionAnalysis', 'fingerprint', 'createdAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && isValidSubjectId(data.subjectId)
+        && data.subtopic is string && data.subtopic.size() >= 1 && data.subtopic.size() <= 160
+        && data.format in ['MCQ', 'MSQ', 'NAT']
+        && data.marks is number && (data.marks == 1 || data.marks == 2)
+        && data.difficulty in ['Easy', 'Medium', 'Hard']
+        && data.sourceTag is string && data.sourceTag.size() >= 1 && data.sourceTag.size() <= 120
+        && data.sourceUrl is string && data.sourceUrl.size() <= 500
+        && data.prompt is string && data.prompt.size() >= 5 && data.prompt.size() <= 4000
+        && data.codeSnippet is string && data.codeSnippet.size() <= 4000
+        && data.options is list && data.options.size() <= 6
+        && (data.options.size() == 0 || data.options[0] is map)
+        && data.correctOption is string && data.correctOption.size() <= 4
+        && isValidStringList(data.correctOptions, 6)
+        && data.natAnswer is number
+        && data.natTolerance is number && data.natTolerance >= 0 && data.natTolerance <= 100
+        && data.natUnit is string && data.natUnit.size() <= 40
+        && data.explanation is string && data.explanation.size() >= 5 && data.explanation.size() <= 5000
+        && data.wrongOptionAnalysis is string && data.wrongOptionAnalysis.size() <= 3000
+        && data.fingerprint is string && data.fingerprint.size() >= 4 && data.fingerprint.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidVerifiedAnswer(data, userId, questionId) {
+      return data.keys().hasAll([
+          'ownerId', 'questionId', 'format', 'correctOption', 'correctOptions',
+          'natAnswer', 'natTolerance', 'explanation', 'wrongOptionAnalysis',
+          'source', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'questionId', 'format', 'correctOption', 'correctOptions',
+          'natAnswer', 'natTolerance', 'explanation', 'wrongOptionAnalysis',
+          'source', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && data.questionId == questionId
+        && isValidId(data.questionId)
+        && data.format in ['MCQ', 'MSQ', 'NAT']
+        && data.correctOption is string && data.correctOption.size() <= 4
+        && isValidStringList(data.correctOptions, 6)
+        && data.natAnswer is number
+        && data.natTolerance is number && data.natTolerance >= 0 && data.natTolerance <= 100
+        && data.explanation is string && data.explanation.size() <= 5000
+        && data.wrongOptionAnalysis is string && data.wrongOptionAnalysis.size() <= 3000
+        && data.source in ['manual', 'ai']
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTrapVaultEntry(data, userId) {
+      return data.keys().hasAll([
+          'ownerId', 'subjectId', 'title', 'category', 'summary', 'detail',
+          'formula', 'trapSource', 'generatedDateIst', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'subjectId', 'title', 'category', 'summary', 'detail',
+          'formula', 'trapSource', 'generatedDateIst', 'sourceQuestionId', 'createdAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && isValidSubjectId(data.subjectId)
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 180
+        && data.category in ['Exam Trap', 'Formula', 'Shortcut', 'Edge Case']
+        && data.summary is string && data.summary.size() <= 400
+        && data.detail is string && data.detail.size() >= 5 && data.detail.size() <= 3000
+        && data.formula is string && data.formula.size() <= 400
+        && data.trapSource in ['ai_daily', 'ai_subject', 'mistake_mined', 'local_mined', 'manual']
+        && data.generatedDateIst is string && data.generatedDateIst.size() <= 16
+        && (!('sourceQuestionId' in data) || (data.sourceQuestionId is string && data.sourceQuestionId.size() <= 128))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSrsReviewCard(data, userId, cardId) {
+      return data.keys().hasAll([
+          'ownerId', 'cardId', 'itemType', 'itemId', 'intervalDays',
+          'nextReviewDate', 'lastRating', 'reviewCount', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'cardId', 'itemType', 'itemId', 'intervalDays',
+          'nextReviewDate', 'lastRating', 'reviewCount', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && data.cardId == cardId
+        && isValidId(data.cardId)
+        && data.itemType in ['mistake', 'trap']
+        && data.itemId is string && data.itemId.size() >= 1 && data.itemId.size() <= 128
+        && data.intervalDays is number && data.intervalDays in [1, 3, 7, 14]
+        && data.nextReviewDate is string && data.nextReviewDate.size() == 10 && data.nextReviewDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.lastRating in ['hard', 'good', 'mastered']
+        && data.reviewCount is number && data.reviewCount >= 1 && data.reviewCount <= 10000
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidGaStreakEntry(data, userId, dateIso) {
+      return data.keys().hasAll([
+          'ownerId', 'date', 'completedAt', 'questionsCount', 'correctCount',
+          'marksAwarded', 'maxMarks', 'accuracyPct', 'durationSeconds', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'date', 'completedAt', 'questionsCount', 'correctCount',
+          'marksAwarded', 'maxMarks', 'accuracyPct', 'durationSeconds', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && data.date == dateIso
+        && data.date is string && data.date.size() == 10 && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.completedAt is string && data.completedAt.size() >= 10 && data.completedAt.size() <= 40
+        && data.questionsCount is number && data.questionsCount >= 1 && data.questionsCount <= 25
+        && data.correctCount is number && data.correctCount >= 0 && data.correctCount <= 25
+        && data.marksAwarded is number && data.marksAwarded >= -25 && data.marksAwarded <= 50
+        && data.maxMarks is number && data.maxMarks >= 1 && data.maxMarks <= 50
+        && data.accuracyPct is number && data.accuracyPct >= 0 && data.accuracyPct <= 100
+        && data.durationSeconds is number && data.durationSeconds >= 0 && data.durationSeconds <= 3600
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTraceTable(data, userId, questionId) {
+      return data.keys().hasAll([
+          'ownerId', 'questionId', 'presetName', 'columns', 'rows', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'questionId', 'presetName', 'columns', 'rows', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && data.questionId == questionId
+        && isValidId(data.questionId)
+        && data.presetName is string && data.presetName.size() <= 64
+        && data.columns is list && data.columns.size() >= 1 && data.columns.size() <= 12
+        && data.rows is list && data.rows.size() <= 60
+        && data.updatedAt is timestamp;
+    }
+
+    // ==================== COLLECTION MATCH RULES ====================
+
+    match /users/{userId} {
+      allow get: if isVerified() && isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isVerified()
+        && isOwner(userId)
+        && isValidId(userId)
+        && isValidUserRoot(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerified()
+        && isOwner(userId)
+        && isValidId(userId)
+        && isValidUserRoot(incoming(), userId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']);
+      allow delete: if false;
+
+      match /meta/{metaId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(metaId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(metaId)
+          && isValidWorkspaceMeta(incoming(), userId)
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(metaId)
+          && isValidWorkspaceMeta(incoming(), userId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'theme', 'themeMode', 'uiScale', 'contentWidth',
+            'targetDateIso', 'shift', 'dailyGoalMinutes',
+            'pomodoroWorkMinutes', 'pomodoroShortBreakMinutes', 'pomodoroLongBreakMinutes',
+            'timerChimeEnabled', 'autoHideRemoved2027', 'autoAddWrongToMistakes',
+            'showLivePaceTimer', 'enableKeyboardShortcuts',
+            'lastAutopilotIstDate', 'lastTrapsIstDate',
+            'bookmarkedQuestions', 'bookmarkedTips', 'updatedAt'
+          ]);
+        allow delete: if isVerified() && isOwner(userId) && isValidId(metaId);
+      }
+
+      match /syllabus/{subtopicId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(subtopicId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(subtopicId)
+          && isValidSubtopicProgress(incoming(), userId, subtopicId)
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(subtopicId)
+          && isValidSubtopicProgress(incoming(), userId, subtopicId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().subtopicId == existing().subtopicId
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'lastRevisedAt', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['confidence', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['notes', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'confidence', 'lastRevisedAt', 'notes', 'updatedAt'])
+          );
+        allow delete: if isVerified() && isOwner(userId) && isValidId(subtopicId);
+      }
+
+      match /study_logs/{logId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(logId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(logId)
+          && isValidStudyLog(incoming(), userId)
+          && incoming().createdAt == request.time
+          && (!('updatedAt' in incoming()) || incoming().updatedAt == request.time)
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(logId)
+          && isValidStudyLog(incoming(), userId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().date == existing().date
+          && incoming().subjectId == existing().subjectId
+          && incoming().minutes == existing().minutes
+          && incoming().mode == existing().mode
+          && incoming().completedAt == existing().completedAt
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['resumeNote', 'goal', 'sessionType', 'updatedAt']);
+        allow delete: if isVerified() && isOwner(userId) && isValidId(logId);
+      }
+
+      match /attempts/{questionId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(questionId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(questionId)
+          && isValidQuestionAttempt(incoming(), userId, questionId)
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(questionId)
+          && isValidQuestionAttempt(incoming(), userId, questionId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().questionId == existing().questionId
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['isCorrect', 'marksAwarded', 'maxMarks', 'attemptedAt', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['isCorrect', 'marksAwarded', 'maxMarks', 'attemptedAt', 'selectedAnswer', 'updatedAt'])
+          );
+        allow delete: if isVerified() && isOwner(userId) && isValidId(questionId);
+      }
+
+      match /mistakes/{questionId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(questionId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(questionId)
+          && isValidMistakeEntry(incoming(), userId, questionId)
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(questionId)
+          && isValidMistakeEntry(incoming(), userId, questionId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().questionId == existing().questionId
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['errorTag', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['userNote', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['resolved', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['wrongCount', 'lastAttemptedAt', 'resolved', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['errorTag', 'wrongCount', 'lastAttemptedAt', 'resolved', 'userNote', 'updatedAt'])
+          );
+        allow delete: if isVerified() && isOwner(userId) && isValidId(questionId);
+      }
+
+      match /sketches/{questionId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(questionId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(questionId)
+          && isValidSavedSketch(incoming(), userId, questionId)
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(questionId)
+          && isValidSavedSketch(incoming(), userId, questionId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().questionId == existing().questionId
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['dataUrl', 'updatedAt']);
+        allow delete: if isVerified() && isOwner(userId) && isValidId(questionId);
+      }
+
+      match /mocks/{mockId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(mockId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(mockId)
+          && isValidMockTest(incoming(), userId)
+          && incoming().createdAt == request.time
+          && parentUserExists(userId);
+        allow update: if false;
+        allow delete: if isVerified() && isOwner(userId) && isValidId(mockId);
+      }
+
+      match /custom_tips/{tipId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(tipId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(tipId)
+          && isValidCustomTip(incoming(), userId)
+          && incoming().createdAt == request.time
+          && parentUserExists(userId);
+        allow update: if false;
+        allow delete: if isVerified() && isOwner(userId) && isValidId(tipId);
+      }
+
+      match /pyq_bank/{questionId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(questionId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(questionId)
+          && isValidPyqQuestion(incoming(), userId)
+          && incoming().createdAt == request.time
+          && parentUserExists(userId);
+        allow update: if false;
+        allow delete: if isVerified() && isOwner(userId) && isValidId(questionId);
+      }
+
+      match /verified_answers/{questionId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(questionId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(questionId)
+          && isValidVerifiedAnswer(incoming(), userId, questionId)
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(questionId)
+          && isValidVerifiedAnswer(incoming(), userId, questionId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().questionId == existing().questionId
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'format', 'correctOption', 'correctOptions', 'natAnswer', 'natTolerance',
+            'explanation', 'wrongOptionAnalysis', 'source', 'updatedAt'
+          ]);
+        allow delete: if isVerified() && isOwner(userId) && isValidId(questionId);
+      }
+
+      match /traps_vault/{trapId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(trapId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(trapId)
+          && isValidTrapVaultEntry(incoming(), userId)
+          && incoming().createdAt == request.time
+          && parentUserExists(userId);
+        allow update: if false;
+        allow delete: if isVerified() && isOwner(userId) && isValidId(trapId);
+      }
+
+      match /srs_cards/{cardId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(cardId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(cardId)
+          && isValidSrsReviewCard(incoming(), userId, cardId)
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(cardId)
+          && isValidSrsReviewCard(incoming(), userId, cardId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().cardId == existing().cardId
+          && incoming().itemType == existing().itemType
+          && incoming().itemId == existing().itemId
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'intervalDays', 'nextReviewDate', 'lastRating', 'reviewCount', 'updatedAt'
+          ]);
+        allow delete: if isVerified() && isOwner(userId) && isValidId(cardId);
+      }
+
+      match /ga_streak/{dateIso} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(dateIso);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(dateIso)
+          && isValidGaStreakEntry(incoming(), userId, dateIso)
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(dateIso)
+          && isValidGaStreakEntry(incoming(), userId, dateIso)
+          && incoming().ownerId == existing().ownerId
+          && incoming().date == existing().date
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'completedAt', 'questionsCount', 'correctCount',
+            'marksAwarded', 'maxMarks', 'accuracyPct', 'durationSeconds', 'updatedAt'
+          ]);
+        allow delete: if isVerified() && isOwner(userId) && isValidId(dateIso);
+      }
+
+      match /trace_tables/{questionId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(questionId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(questionId)
+          && isValidTraceTable(incoming(), userId, questionId)
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(questionId)
+          && isValidTraceTable(incoming(), userId, questionId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().questionId == existing().questionId
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'presetName', 'columns', 'rows', 'updatedAt'
+          ]);
+        allow delete: if isVerified() && isOwner(userId) && isValidId(questionId);
+      }
+    }
+  }
+}

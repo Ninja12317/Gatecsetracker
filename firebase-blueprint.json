@@ -1,0 +1,859 @@
+{
+  "entities": {
+    "UserRoot": {
+      "title": "UserRoot",
+      "description": "Root ownership document for a verified Google Sign-In user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "displayName", "createdAt", "updatedAt"]
+    },
+    "WorkspaceMeta": {
+      "title": "WorkspaceMeta",
+      "description": "User workspace preferences, exam countdown settings, bookmarks, and daily autopilot state.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "theme": {
+          "type": "string",
+          "enum": ["light", "dark"]
+        },
+        "targetDateIso": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "shift": {
+          "type": "string",
+          "enum": ["Forenoon (09:30 IST)", "Afternoon (14:30 IST)"]
+        },
+        "dailyGoalMinutes": {
+          "type": "number"
+        },
+        "lastAutopilotIstDate": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "lastTrapsIstDate": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "themeMode": {
+          "type": "string",
+          "enum": ["light", "dark", "system"]
+        },
+        "uiScale": {
+          "type": "string",
+          "enum": ["compact", "default", "comfortable"]
+        },
+        "contentWidth": {
+          "type": "string",
+          "enum": ["focused", "wide"]
+        },
+        "pomodoroWorkMinutes": { "type": "number" },
+        "pomodoroShortBreakMinutes": { "type": "number" },
+        "pomodoroLongBreakMinutes": { "type": "number" },
+        "timerChimeEnabled": { "type": "boolean" },
+        "autoHideRemoved2027": { "type": "boolean" },
+        "autoAddWrongToMistakes": { "type": "boolean" },
+        "showLivePaceTimer": { "type": "boolean" },
+        "enableKeyboardShortcuts": { "type": "boolean" },
+        "bookmarkedQuestions": {
+          "type": "array",
+          "description": "Bounded list of up to 200 bookmarked question IDs."
+        },
+        "bookmarkedTips": {
+          "type": "array",
+          "description": "Bounded list of up to 200 bookmarked tip IDs."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "theme",
+        "targetDateIso",
+        "shift",
+        "dailyGoalMinutes",
+        "lastAutopilotIstDate",
+        "bookmarkedQuestions",
+        "bookmarkedTips",
+        "updatedAt"
+      ]
+    },
+    "SubtopicProgress": {
+      "title": "SubtopicProgress",
+      "description": "Mastery status, confidence rating, spaced-revision date, and notes for one GATE 2027 subtopic.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "subtopicId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["not_started", "concept_done", "pyqs_done", "mastered"]
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "lastRevisedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "subtopicId", "status", "confidence", "lastRevisedAt", "notes", "updatedAt"]
+    },
+    "StudyLog": {
+      "title": "StudyLog",
+      "description": "Completed deep-work timer or stopwatch session for the 70-day consistency heatmap and Focus Studio timeline.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 16,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "subjectId": {
+          "type": "string",
+          "enum": ["ga", "em", "dl", "coa", "pds", "algo", "toc", "cd", "os", "dbms", "cn"]
+        },
+        "minutes": {
+          "type": "number"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["pomodoro", "stopwatch"]
+        },
+        "completedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "startedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "sessionType": {
+          "type": "string",
+          "enum": ["Concept", "PYQs", "Mock Analysis", "Revision"]
+        },
+        "goal": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "resumeNote": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "distractions": {
+          "type": "number"
+        },
+        "presetLabel": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "date", "subjectId", "minutes", "mode", "completedAt", "createdAt"]
+    },
+    "QuestionAttempt": {
+      "title": "QuestionAttempt",
+      "description": "Latest graded GATE attempt record for a PYQ question.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "questionId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "isCorrect": {
+          "type": "boolean"
+        },
+        "marksAwarded": {
+          "type": "number"
+        },
+        "maxMarks": {
+          "type": "number"
+        },
+        "attemptedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "selectedAnswer": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "questionId", "isCorrect", "marksAwarded", "maxMarks", "attemptedAt", "updatedAt"]
+    },
+    "MistakeEntry": {
+      "title": "MistakeEntry",
+      "description": "Captured incorrect or bookmarked question in the user's Mistake Bucket.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "questionId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "errorTag": {
+          "type": "string",
+          "enum": ["Conceptual Gap", "Silly Math", "MSQ Trap", "Time Pressure"]
+        },
+        "wrongCount": {
+          "type": "number"
+        },
+        "lastAttemptedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "resolved": {
+          "type": "boolean"
+        },
+        "userNote": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "questionId", "errorTag", "wrongCount", "lastAttemptedAt", "resolved", "userNote", "updatedAt"]
+    },
+    "SavedSketch": {
+      "title": "SavedSketch",
+      "description": "Compressed HTML5 Canvas rough-work sketch saved for a question.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "questionId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dataUrl": {
+          "type": "string",
+          "maxLength": 450000
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "questionId", "dataUrl", "updatedAt"]
+    },
+    "MockTest": {
+      "title": "MockTest",
+      "description": "Logged Full-Length Mock, Subject Test, or Topic-Wise Test performance record with 1M/2M and penalty diagnostics.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "subjectId": {
+          "type": "string",
+          "enum": ["all", "ga", "em", "dl", "coa", "pds", "algo", "toc", "cd", "os", "dbms", "cn"]
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 16,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["Full-Length Mock", "Subject Test", "Topic-Wise Test"]
+        },
+        "score": {
+          "type": "number"
+        },
+        "maxScore": {
+          "type": "number"
+        },
+        "normalizedScore": {
+          "type": "number"
+        },
+        "percentage": {
+          "type": "number"
+        },
+        "accuracy": {
+          "type": "number"
+        },
+        "totalQuestions": {
+          "type": "number"
+        },
+        "attempted": {
+          "type": "number"
+        },
+        "correct": {
+          "type": "number"
+        },
+        "wrong": {
+          "type": "number"
+        },
+        "unattempted": {
+          "type": "number"
+        },
+        "q1Attempted": { "type": "number" },
+        "q2Attempted": { "type": "number" },
+        "q1Correct": { "type": "number" },
+        "q2Correct": { "type": "number" },
+        "q1Wrong": { "type": "number" },
+        "q2Wrong": { "type": "number" },
+        "q1Total": { "type": "number" },
+        "q2Total": { "type": "number" },
+        "positiveMarks": { "type": "number" },
+        "penaltyMarks": { "type": "number" },
+        "q1PositiveMarks": { "type": "number" },
+        "q2PositiveMarks": { "type": "number" },
+        "q1PenaltyMarks": { "type": "number" },
+        "q2PenaltyMarks": { "type": "number" },
+        "durationMinutes": { "type": "number" },
+        "timeTakenMinutes": { "type": "number" },
+        "rank": { "type": "number" },
+        "totalCandidates": { "type": "number" },
+        "percentile": { "type": "number" },
+        "parseSource": {
+          "type": "string",
+          "enum": ["local_deterministic", "ai_free_tier", "manual"]
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "name", "source", "date", "type", "score", "maxScore", "accuracy", "unattempted", "notes", "createdAt"]
+    },
+    "CustomTip": {
+      "title": "CustomTip",
+      "description": "User-authored or Daily Autopilot fetched GATE exam trap, formula, or shortcut card.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "subjectId": {
+          "type": "string",
+          "enum": ["ga", "em", "dl", "coa", "pds", "algo", "toc", "cd", "os", "dbms", "cn"]
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 180
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Exam Trap", "Formula", "Shortcut", "Edge Case"]
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 3000
+        },
+        "formula": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "sourceUrl": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "subjectId", "title", "category", "summary", "detail", "formula", "sourceUrl", "createdAt"]
+    },
+    "PyqQuestion": {
+      "title": "PyqQuestion",
+      "description": "Cached GATE PYQ or DPP question stored in the user's Firestore pyq_bank collection.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "subjectId": {
+          "type": "string",
+          "enum": ["ga", "em", "dl", "coa", "pds", "algo", "toc", "cd", "os", "dbms", "cn"]
+        },
+        "subtopic": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "format": {
+          "type": "string",
+          "enum": ["MCQ", "MSQ", "NAT"]
+        },
+        "marks": {
+          "type": "number"
+        },
+        "difficulty": {
+          "type": "string",
+          "enum": ["Easy", "Medium", "Hard"]
+        },
+        "sourceTag": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "sourceUrl": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "prompt": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "codeSnippet": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "options": {
+          "type": "array",
+          "description": "Up to 6 options for MCQ/MSQ questions."
+        },
+        "correctOption": {
+          "type": "string",
+          "maxLength": 4
+        },
+        "correctOptions": {
+          "type": "array",
+          "description": "Up to 6 correct option IDs for MSQ."
+        },
+        "natAnswer": {
+          "type": "number"
+        },
+        "natTolerance": {
+          "type": "number"
+        },
+        "natUnit": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "explanation": {
+          "type": "string",
+          "maxLength": 5000
+        },
+        "wrongOptionAnalysis": {
+          "type": "string",
+          "maxLength": 3000
+        },
+        "fingerprint": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "subjectId",
+        "subtopic",
+        "format",
+        "marks",
+        "difficulty",
+        "sourceTag",
+        "sourceUrl",
+        "prompt",
+        "codeSnippet",
+        "options",
+        "correctOption",
+        "correctOptions",
+        "natAnswer",
+        "natTolerance",
+        "natUnit",
+        "explanation",
+        "wrongOptionAnalysis",
+        "fingerprint",
+        "createdAt"
+      ]
+    },
+    "VerifiedAnswer": {
+      "title": "VerifiedAnswer",
+      "description": "Permanently cached verified answer key and first-principles proof for a GateR or PYQ question.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "questionId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "format": {
+          "type": "string",
+          "enum": ["MCQ", "MSQ", "NAT"]
+        },
+        "correctOption": {
+          "type": "string",
+          "maxLength": 4
+        },
+        "correctOptions": {
+          "type": "array",
+          "description": "Up to 6 correct option IDs for MSQ."
+        },
+        "natAnswer": {
+          "type": "number"
+        },
+        "natTolerance": {
+          "type": "number"
+        },
+        "explanation": {
+          "type": "string",
+          "maxLength": 5000
+        },
+        "wrongOptionAnalysis": {
+          "type": "string",
+          "maxLength": 3000
+        },
+        "source": {
+          "type": "string",
+          "enum": ["manual", "ai"]
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "questionId",
+        "format",
+        "correctOption",
+        "correctOptions",
+        "natAnswer",
+        "natTolerance",
+        "explanation",
+        "wrongOptionAnalysis",
+        "source",
+        "updatedAt"
+      ]
+    },
+    "TrapVaultEntry": {
+      "title": "TrapVaultEntry",
+      "description": "Permanent AI-generated or Mistake-mined GATE CSE conceptual trap, edge case, or solving shortcut card.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "subjectId": {
+          "type": "string",
+          "enum": ["ga", "em", "dl", "coa", "pds", "algo", "toc", "cd", "os", "dbms", "cn"]
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 180
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Exam Trap", "Formula", "Shortcut", "Edge Case"]
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 3000
+        },
+        "formula": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "trapSource": {
+          "type": "string",
+          "enum": ["ai_daily", "ai_subject", "mistake_mined", "local_mined", "manual"]
+        },
+        "generatedDateIst": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "sourceQuestionId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "subjectId", "title", "category", "summary", "detail", "formula", "trapSource", "generatedDateIst", "createdAt"]
+    },
+    "SrsReviewCard": {
+      "title": "SrsReviewCard",
+      "description": "Spaced-repetition review schedule (1d/3d/7d/14d) for Rapid-Fire Flash Revision cards.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "cardId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "itemType": {
+          "type": "string",
+          "enum": ["mistake", "trap"]
+        },
+        "itemId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "intervalDays": {
+          "type": "number"
+        },
+        "nextReviewDate": {
+          "type": "string",
+          "maxLength": 16,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "lastRating": {
+          "type": "string",
+          "enum": ["hard", "good", "mastered"]
+        },
+        "reviewCount": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "cardId", "itemType", "itemId", "intervalDays", "nextReviewDate", "lastRating", "reviewCount", "updatedAt"]
+    },
+    "GaStreakEntry": {
+      "title": "GaStreakEntry",
+      "description": "Daily 10-minute General Aptitude (GA) lock-in sprint completion record keyed by YYYY-MM-DD.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 16,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "completedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "questionsCount": { "type": "number" },
+        "correctCount": { "type": "number" },
+        "marksAwarded": { "type": "number" },
+        "maxMarks": { "type": "number" },
+        "accuracyPct": { "type": "number" },
+        "durationSeconds": { "type": "number" },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "date", "completedAt", "questionsCount", "correctCount", "marksAwarded", "maxMarks", "accuracyPct", "durationSeconds", "updatedAt"]
+    },
+    "DryRunTraceTable": {
+      "title": "DryRunTraceTable",
+      "description": "Structured dry-run variable/pointer/stack trace table saved per PYQ question.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "questionId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "presetName": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "columns": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "cells": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "questionId", "presetName", "columns", "rows", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserRoot" },
+      "description": "Root ownership document for verified user; acts as Master Gate parent for all subcollections."
+    },
+    "/users/{userId}/meta/{metaId}": {
+      "schema": { "$ref": "#/entities/WorkspaceMeta" },
+      "description": "Workspace settings, theme, scaling, bookmarks, and daily autopilot IST date."
+    },
+    "/users/{userId}/syllabus/{subtopicId}": {
+      "schema": { "$ref": "#/entities/SubtopicProgress" },
+      "description": "Real-time syllabus subtopic progress, confidence, revision timestamps, and notes."
+    },
+    "/users/{userId}/study_logs/{logId}": {
+      "schema": { "$ref": "#/entities/StudyLog" },
+      "description": "Real-time focus timer and stopwatch sessions powering the 70-day heatmap."
+    },
+    "/users/{userId}/attempts/{questionId}": {
+      "schema": { "$ref": "#/entities/QuestionAttempt" },
+      "description": "Graded PYQ attempt history for accuracy and projected GATE marks."
+    },
+    "/users/{userId}/mistakes/{questionId}": {
+      "schema": { "$ref": "#/entities/MistakeEntry" },
+      "description": "Mistake Bucket items with error classification, notes, and resolution tracking."
+    },
+    "/users/{userId}/sketches/{questionId}": {
+      "schema": { "$ref": "#/entities/SavedSketch" },
+      "description": "Compressed HTML5 Canvas rough-work sketches keyed by questionId."
+    },
+    "/users/{userId}/mocks/{mockId}": {
+      "schema": { "$ref": "#/entities/MockTest" },
+      "description": "Full-length mock and subject test scores, accuracy, and mistake logs."
+    },
+    "/users/{userId}/custom_tips/{tipId}": {
+      "schema": { "$ref": "#/entities/CustomTip" },
+      "description": "User-added shortcuts and Daily Autopilot GATE trap cards."
+    },
+    "/users/{userId}/pyq_bank/{questionId}": {
+      "schema": { "$ref": "#/entities/PyqQuestion" },
+      "description": "Cache-first PYQ repository populated via Daily Autopilot, Subject Fetch, URL Importer, and Bulk JSON Import."
+    },
+    "/users/{userId}/verified_answers/{questionId}": {
+      "schema": { "$ref": "#/entities/VerifiedAnswer" },
+      "description": "User-saved or Free-Tier AI verified answer keys and proofs keyed by stable questionId."
+    },
+    "/users/{userId}/traps_vault/{trapId}": {
+      "schema": { "$ref": "#/entities/TrapVaultEntry" },
+      "description": "Permanent library of AI-generated daily GATE CSE traps and mistake-mined conceptual warnings."
+    },
+    "/users/{userId}/srs_cards/{cardId}": {
+      "schema": { "$ref": "#/entities/SrsReviewCard" },
+      "description": "Spaced-repetition review intervals (1d/3d/7d/14d) for Rapid-Fire Flash Revision cards."
+    },
+    "/users/{userId}/ga_streak/{dateIso}": {
+      "schema": { "$ref": "#/entities/GaStreakEntry" },
+      "description": "Daily 10-minute General Aptitude lock-in streak completion records."
+    },
+    "/users/{userId}/trace_tables/{questionId}": {
+      "schema": { "$ref": "#/entities/DryRunTraceTable" },
+      "description": "Structured dry-run trace tables saved per PYQ questionId."
+    }
+  }
+}
