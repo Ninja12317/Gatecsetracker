@@ -252,6 +252,7 @@ export interface ExamSettings {
   autoAddWrongToMistakes: boolean;
   showLivePaceTimer: boolean;
   enableKeyboardShortcuts: boolean;
+  enableMobileSwipeNav?: boolean;
 }
 
 export type PdfExportLayout = 'worksheet' | 'solutions';

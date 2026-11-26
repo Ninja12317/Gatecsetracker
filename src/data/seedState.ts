@@ -20,6 +20,7 @@ export const DEFAULT_EXAM_SETTINGS: ExamSettings = {
   autoAddWrongToMistakes: true,
   showLivePaceTimer: true,
   enableKeyboardShortcuts: true,
+  enableMobileSwipeNav: true,
 };
 
 export function createInitialProgress(): Record<string, SubtopicProgress> {

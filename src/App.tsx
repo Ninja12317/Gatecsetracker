@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { ArrowLeft, ArrowRight, AlertTriangle } from 'lucide-react';
 import type { NavView, PdfExportRequest, SubjectId } from './types';
 import { useWarRoomStore } from './hooks/useWarRoomStore';
 import {
@@ -7,8 +8,16 @@ import {
   toLocalIsoDate,
 } from './utils/gateMath';
 import { isSrsCardDueToday, makeSrsCardId } from './utils/examPolish';
-import { GATE_2027_SYLLABUS } from './data/syllabus';
+import {
+  VIEW_HEADER_TITLES,
+  popHistoryEntry,
+  pushHistoryEntry,
+  shouldShowContextualBack,
+  type NavHistoryEntry,
+} from './utils/mobileNav';
+import { GATE_2027_SYLLABUS, SUBJECT_MAP } from './data/syllabus';
 import { TopBar } from './components/TopBar';
+import { MobileBottomNav } from './components/MobileBottomNav';
 import { SlideOverDrawer } from './components/SlideOverDrawer';
 import { DashboardView } from './components/DashboardView';
 import { FocusStudioView } from './components/FocusStudioView';
@@ -27,6 +36,7 @@ import { PdfExportModal } from './components/PdfExportModal';
 import { VectorPrintSheet, type ActivePrintJob } from './components/VectorPrintSheet';
 import { PwaInstallModal, OfflineStatusBanner } from './components/PwaInstallModal';
 import { usePwaInstall } from './hooks/usePwaInstall';
+import { useSwipeTabNavigation } from './hooks/useSwipeTabNavigation';
 import { FocusTimerProvider } from './context/FocusTimerContext';
 
 const VALID_TABS: NavView[] = [
@@ -68,6 +78,60 @@ export default function App() {
   const [autoStartGaSprintTrigger, setAutoStartGaSprintTrigger] = useState(0);
   const [openMistakesTrigger, setOpenMistakesTrigger] = useState(0);
   const [launchSketchpadSprintTrigger, setLaunchSketchpadSprintTrigger] = useState(0);
+  const [exitPyqSessionTrigger, setExitPyqSessionTrigger] = useState(0);
+  const [resetPyqStudioTabTrigger, setResetPyqStudioTabTrigger] = useState(0);
+  const [confirmExitTimedTestOpen, setConfirmExitTimedTestOpen] = useState(false);
+
+  const [pyqSessionInfo, setPyqSessionInfo] = useState<{
+    active: boolean;
+    isTimed: boolean;
+    finished: boolean;
+    title: string;
+    sketchpadOpen: boolean;
+    studioTab: 'practice' | 'mistakes' | 'resources';
+  }>({
+    active: false,
+    isTimed: false,
+    finished: false,
+    title: '',
+    sketchpadOpen: false,
+    studioTab: 'practice',
+  });
+
+  // Navigation history stack synced with window.history for Android hardware/gesture back & contextual TopBar ←
+  const [historyStack, setHistoryStack] = useState<NavHistoryEntry[]>(() => [
+    { view: getInitialViewFromUrl() },
+  ]);
+  const historyStackRef = useRef<NavHistoryEntry[]>(historyStack);
+  historyStackRef.current = historyStack;
+
+  const navigateTo = useCallback(
+    (view: NavView, opts?: { subContext?: string; label?: string; skipPushState?: boolean }) => {
+      setActiveView(view);
+      if (view !== 'syllabus' && !opts?.subContext?.startsWith('subject:')) {
+        setFocusedSubjectId(null);
+      }
+      if (view !== 'pyq') {
+        setPyqSessionInfo((prev) =>
+          prev.active ? { ...prev, active: false, finished: false, sketchpadOpen: false } : prev
+        );
+      }
+      const nextEntry: NavHistoryEntry = {
+        view,
+        subContext: opts?.subContext,
+        label: opts?.label,
+      };
+      setHistoryStack((prev) => pushHistoryEntry(prev, nextEntry));
+      if (!opts?.skipPushState && typeof window !== 'undefined') {
+        try {
+          window.history.pushState({ warRoomNav: true, entry: nextEntry }, '');
+        } catch {
+          // Safe fallback in sandboxed iframes
+        }
+      }
+    },
+    []
+  );
 
   // Auto-exit Zen Fullscreen Mode whenever leaving PYQ Studio
   useEffect(() => {
@@ -194,34 +258,155 @@ export default function App() {
     [store.state.studyLogs]
   );
 
-  const handleJumpToSubject = useCallback((subjectId: SubjectId) => {
-    setActiveView('syllabus');
-    setFocusedSubjectId(subjectId);
-  }, []);
+  const handleJumpToSubject = useCallback(
+    (subjectId: SubjectId) => {
+      setFocusedSubjectId(subjectId);
+      navigateTo('syllabus', {
+        subContext: `subject:${subjectId}`,
+        label: SUBJECT_MAP[subjectId]?.shortName ?? 'Subject',
+      });
+    },
+    [navigateTo]
+  );
 
   const handleLaunchDailyDpp = useCallback(() => {
-    setActiveView('pyq');
+    navigateTo('pyq', { subContext: 'pyq:dpp', label: 'Daily Mixed DPP' });
     setAutoStartDppTrigger((n) => n + 1);
-  }, []);
+  }, [navigateTo]);
 
   const handleLaunchGaSprint = useCallback(() => {
-    setActiveView('pyq');
+    navigateTo('pyq', { subContext: 'pyq:ga', label: 'Daily GA Sprint' });
     setAutoStartGaSprintTrigger((n) => n + 1);
-  }, []);
+  }, [navigateTo]);
 
   const handleLaunchSketchpadSprint = useCallback(() => {
-    setActiveView('pyq');
+    navigateTo('pyq', { subContext: 'pyq:sketch', label: 'Rough-Work Sprint' });
     setLaunchSketchpadSprintTrigger((n) => n + 1);
-  }, []);
+  }, [navigateTo]);
 
   const handleOpenMistakesBucket = useCallback(() => {
-    setActiveView('pyq');
+    navigateTo('pyq', { subContext: 'pyq:mistakes', label: 'Mistake Bucket' });
     setOpenMistakesTrigger((n) => n + 1);
-  }, []);
+  }, [navigateTo]);
 
   const handleJumpToFocusTimer = useCallback(() => {
-    setActiveView('focus');
-  }, []);
+    navigateTo('focus');
+  }, [navigateTo]);
+
+  const handlePyqSessionStateChange = useCallback(
+    (info: {
+      active: boolean;
+      isTimed: boolean;
+      finished: boolean;
+      title: string;
+      sketchpadOpen: boolean;
+      studioTab: 'practice' | 'mistakes' | 'resources';
+    }) => {
+      setPyqSessionInfo((prev) => {
+        if (
+          prev.active === info.active &&
+          prev.isTimed === info.isTimed &&
+          prev.finished === info.finished &&
+          prev.title === info.title &&
+          prev.sketchpadOpen === info.sketchpadOpen &&
+          prev.studioTab === info.studioTab
+        ) {
+          return prev;
+        }
+        return info;
+      });
+    },
+    []
+  );
+
+  // Contextual Back Arrow & Android hardware/gesture back handler
+  const handleContextualBack = useCallback(
+    (fromPopstate = false) => {
+      // 1. Protect active unfinished timed PYQ test with a clean confirmation dialog
+      if (activeView === 'pyq' && pyqSessionInfo.active && !pyqSessionInfo.finished && pyqSessionInfo.isTimed) {
+        if (fromPopstate && typeof window !== 'undefined') {
+          try {
+            window.history.pushState({ warRoomNav: true, guard: 'timed-test' }, '');
+          } catch {
+            // ignore
+          }
+        }
+        setConfirmExitTimedTestOpen(true);
+        return;
+      }
+
+      // 2. Exit active practice sprint or finished score report back to Test Builder
+      if (activeView === 'pyq' && pyqSessionInfo.active) {
+        setExitPyqSessionTrigger((n) => n + 1);
+        return;
+      }
+
+      // 3. Return from PYQ Mistakes or Importers sub-tab back to Test Builder
+      if (activeView === 'pyq' && pyqSessionInfo.studioTab !== 'practice') {
+        setResetPyqStudioTabTrigger((n) => n + 1);
+        return;
+      }
+
+      // 4. Clear focused subject inside Syllabus back to full 11-subject list
+      if (activeView === 'syllabus' && focusedSubjectId) {
+        setFocusedSubjectId(null);
+        return;
+      }
+
+      // 5. Pop internal history stack cleanly (falls back to Overview)
+      const { nextStack, target } = popHistoryEntry(historyStackRef.current);
+      setHistoryStack(nextStack);
+      setActiveView(target.view);
+      if (target.subContext?.startsWith('subject:')) {
+        setFocusedSubjectId(target.subContext.replace('subject:', '') as SubjectId);
+      } else {
+        setFocusedSubjectId(null);
+      }
+    },
+    [activeView, pyqSessionInfo, focusedSubjectId]
+  );
+
+  // Sync Android hardware/gesture back button (`popstate`) cleanly
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onPopState = () => {
+      if (drawerOpen) {
+        setDrawerOpen(false);
+        return;
+      }
+      if (calculatorOpen) {
+        setCalculatorOpen(false);
+        return;
+      }
+      if (commandPaletteOpen) {
+        setCommandPaletteOpen(false);
+        return;
+      }
+      if (infoModalOpen) {
+        setInfoModalOpen(false);
+        return;
+      }
+      if (pdfModalRequest) {
+        setPdfModalRequest(null);
+        return;
+      }
+      if (activeView !== 'dashboard' || focusedSubjectId || pyqSessionInfo.active || pyqSessionInfo.studioTab !== 'practice') {
+        handleContextualBack(true);
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [
+    activeView,
+    focusedSubjectId,
+    pyqSessionInfo,
+    drawerOpen,
+    calculatorOpen,
+    commandPaletteOpen,
+    infoModalOpen,
+    pdfModalRequest,
+    handleContextualBack,
+  ]);
 
   const handleExportStudyReportPdf = useCallback(() => {
     setPdfModalRequest({
@@ -240,6 +425,49 @@ export default function App() {
   const contentWidth = store.state.settings.contentWidth ?? 'standard';
   const containerMaxWidth = contentWidth === 'wide' ? 'max-w-[1536px]' : 'max-w-[1280px]';
   const hideChrome = zenMode && activeView === 'pyq';
+  const isActivePyqTest = activeView === 'pyq' && pyqSessionInfo.active && !pyqSessionInfo.finished;
+  const hasNestedView =
+    Boolean(focusedSubjectId) ||
+    (activeView === 'pyq' && (pyqSessionInfo.active || pyqSessionInfo.studioTab !== 'practice'));
+  const showContextualBack = shouldShowContextualBack(activeView, hasNestedView);
+
+  const mobileHeaderTitle = useMemo(() => {
+    if (activeView === 'pyq') {
+      if (pyqSessionInfo.active) {
+        return pyqSessionInfo.finished ? 'Score Report' : pyqSessionInfo.title || 'PYQ Sprint';
+      }
+      if (pyqSessionInfo.studioTab === 'mistakes') return 'Mistake Bucket';
+      if (pyqSessionInfo.studioTab === 'resources') return 'PYQ Importers';
+      return 'PYQ Studio';
+    }
+    if (activeView === 'syllabus' && focusedSubjectId) {
+      return SUBJECT_MAP[focusedSubjectId]?.shortName ?? 'Subjects';
+    }
+    return VIEW_HEADER_TITLES[activeView] ?? "GATE '27";
+  }, [activeView, pyqSessionInfo, focusedSubjectId]);
+
+  const anyModalOrOverlayOpen =
+    drawerOpen ||
+    calculatorOpen ||
+    commandPaletteOpen ||
+    infoModalOpen ||
+    Boolean(pdfModalRequest) ||
+    pwa.guideOpen ||
+    confirmExitTimedTestOpen;
+
+  const swipe = useSwipeTabNavigation({
+    activeView,
+    enabled: store.state.settings.enableMobileSwipeNav ?? true,
+    disabled: hideChrome || isActivePyqTest || pyqSessionInfo.sketchpadOpen || anyModalOrOverlayOpen,
+    onSelectTab: (nextView) => navigateTo(nextView),
+  });
+
+  const hideMobileBottomNav =
+    hideChrome ||
+    isActivePyqTest ||
+    pyqSessionInfo.sketchpadOpen ||
+    anyModalOrOverlayOpen ||
+    swipe.isKeyboardOpen;
 
   return (
     <FocusTimerProvider
@@ -259,16 +487,46 @@ export default function App() {
             quotaNotice={store.quotaNotice}
             unresolvedMistakesCount={unresolvedMistakesCount}
             revisionDueCount={revisionDueCount}
-            onSelectView={setActiveView}
+            showBackButton={showContextualBack}
+            mobileTitle={mobileHeaderTitle}
+            onBack={() => handleContextualBack(false)}
+            onSelectView={(v) => navigateTo(v)}
             onSignInGoogle={store.signInWithGoogle}
             onOpenCommandPalette={() => setCommandPaletteOpen(true)}
             onOpenDrawer={() => setDrawerOpen(true)}
           />
         )}
 
+        {/* Instagram-Style Edge Peek Hint Pill during Active Horizontal Mobile Swipe */}
+        {swipe.peekTab && swipe.peekSide && (
+          <div
+            aria-hidden="true"
+            data-testid="mobile-swipe-peek-pill"
+            className={`md:hidden fixed top-1/2 -translate-y-1/2 z-40 pointer-events-none px-3.5 py-2 rounded-full bg-[#241914]/90 dark:bg-[#E0A92E] text-[#FAF8F4] dark:text-[#1C1613] text-xs font-bold shadow-warm-lg inline-flex items-center gap-1.5 backdrop-blur-sm ${
+              swipe.peekSide === 'left' ? 'left-3' : 'right-3'
+            }`}
+          >
+            {swipe.peekSide === 'left' && <ArrowLeft className="h-3.5 w-3.5" />}
+            <span>{swipe.peekTab.label}</span>
+            {swipe.peekSide === 'right' && <ArrowRight className="h-3.5 w-3.5" />}
+          </div>
+        )}
+
         <main
-          className={`flex-1 w-full ${containerMaxWidth} mx-auto px-4 sm:px-6 ${
-            hideChrome ? 'py-4' : 'py-6 sm:py-8'
+          {...swipe.touchHandlers}
+          style={
+            swipe.dragOffsetX !== 0 || swipe.isSnapping
+              ? {
+                  transform: `translate3d(${swipe.dragOffsetX}px, 0, 0)`,
+                  transition: swipe.isSnapping
+                    ? 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1)'
+                    : 'none',
+                  willChange: 'transform',
+                }
+              : undefined
+          }
+          className={`flex-1 w-full ${containerMaxWidth} mx-auto px-4 sm:px-6 overflow-x-clip ${
+            hideChrome ? 'py-4' : 'py-5 sm:py-8'
           }`}
         >
           {activeView === 'dashboard' && (
@@ -284,7 +542,7 @@ export default function App() {
               urlIngestLoading={store.urlIngestLoading}
               onRunDailyAutopilot={store.runDailyAutopilot}
               onIngestPublicUrl={store.ingestPublicUrl}
-              onNavigate={setActiveView}
+              onNavigate={(v) => navigateTo(v)}
               onJumpToSubject={handleJumpToSubject}
               onLaunchDailyDpp={handleLaunchDailyDpp}
               onLaunchGaSprint={handleLaunchGaSprint}
@@ -355,6 +613,9 @@ export default function App() {
               zenMode={zenMode}
               onToggleZenMode={() => setZenMode((z) => !z)}
               onRequestPdfExport={setPdfModalRequest}
+              onSessionStateChange={handlePyqSessionStateChange}
+              exitSessionTrigger={exitPyqSessionTrigger}
+              resetStudioTabTrigger={resetPyqStudioTabTrigger}
             />
           )}
 
@@ -372,7 +633,7 @@ export default function App() {
               allQuestions={store.allQuestions}
               allTips={store.allTips}
               onRecordSrsRating={store.recordSrsRating}
-              onGoToPyq={() => setActiveView('pyq')}
+              onGoToPyq={() => navigateTo('pyq')}
             />
           )}
 
@@ -430,9 +691,9 @@ export default function App() {
           )}
         </main>
 
-        {/* Clean Scholarly Footer with persistent Nihal Pawar credit */}
+        {/* Clean Scholarly Footer with persistent Nihal Pawar credit & Mobile Bottom Nav Clearance */}
         {!hideChrome && (
-          <footer className="mt-auto border-t border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#130F0D]">
+          <footer className="mt-auto border-t border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#130F0D] pb-24 md:pb-0">
             <div
               className={`${containerMaxWidth} mx-auto px-4 sm:px-6 py-5 flex flex-wrap items-center justify-between gap-3 text-xs text-[#61554D] dark:text-[#A99B8E]`}
             >
@@ -446,7 +707,7 @@ export default function App() {
               <div className="flex items-center gap-4">
                 <button
                   type="button"
-                  onClick={() => setActiveView('settings')}
+                  onClick={() => navigateTo('settings')}
                   className="hover:text-[#6E261A] dark:hover:text-[#E0A92E] transition-colors"
                 >
                   Settings &amp; Sync
@@ -470,12 +731,68 @@ export default function App() {
           </footer>
         )}
 
+        {/* Sculpted Floating Curved Mobile Bottom Navigation Capsule (< 768px) */}
+        <MobileBottomNav
+          activeView={activeView}
+          hidden={hideMobileBottomNav}
+          onSelectView={(v) => navigateTo(v)}
+        />
+
+        {/* Safe Exit Confirmation Modal when pressing Back during an Active Timed Mock */}
+        {confirmExitTimedTestOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="exit-timed-test-title"
+            data-testid="exit-timed-test-modal"
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#1C1613]/55 backdrop-blur-xs p-3 sm:p-4"
+          >
+            <div className="w-full max-w-sm rounded-[26px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-5 shadow-warm-lg space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="h-10 w-10 rounded-full bg-[#FDF6E3] dark:bg-[#2C2215] border border-[#EED89A] dark:border-[#5C441B] text-[#8B6209] dark:text-[#E0A92E] flex items-center justify-center shrink-0">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3
+                    id="exit-timed-test-title"
+                    className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8]"
+                  >
+                    Leave Active Timed Mock?
+                  </h3>
+                  <p className="mt-1 text-xs text-[#61554D] dark:text-[#A99B8E] leading-relaxed">
+                    Your timed mock is still running. Return to keep solving, or exit to PYQ Test Builder.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setConfirmExitTimedTestOpen(false)}
+                  className="h-10 px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] press-tactile"
+                >
+                  Keep Solving
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmExitTimedTestOpen(false);
+                    setExitPyqSessionTrigger((n) => n + 1);
+                  }}
+                  className="h-10 px-4 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] text-white text-xs font-semibold press-tactile"
+                >
+                  Exit Test
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Global Overlays */}
         <SlideOverDrawer
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
           activeView={activeView}
-          onNavigate={setActiveView}
+          onNavigate={(v) => navigateTo(v)}
           onOpenMistakeBucket={handleOpenMistakesBucket}
           onJumpFocusTimer={handleJumpToFocusTimer}
           onOpenCalculator={() => setCalculatorOpen((o) => !o)}
@@ -506,7 +823,7 @@ export default function App() {
           open={commandPaletteOpen}
           onClose={() => setCommandPaletteOpen(false)}
           theme={store.state.theme}
-          onNavigate={setActiveView}
+          onNavigate={(v) => navigateTo(v)}
           onJumpToSubject={handleJumpToSubject}
           onLaunchDailyDpp={handleLaunchDailyDpp}
           onLaunchGaSprint={handleLaunchGaSprint}
@@ -541,7 +858,7 @@ export default function App() {
           <div
             role="status"
             data-testid="global-pdf-toast"
-            className="no-print fixed bottom-5 left-1/2 -translate-x-1/2 z-50 max-w-md rounded-full bg-[#241914] text-[#FAF5EB] border border-[#C89216]/50 px-5 py-2.5 text-xs font-semibold shadow-warm-lg flex items-center gap-2.5"
+            className="no-print fixed bottom-[90px] md:bottom-5 left-1/2 -translate-x-1/2 z-50 max-w-md rounded-full bg-[#241914] text-[#FAF5EB] border border-[#C89216]/50 px-5 py-2.5 text-xs font-semibold shadow-warm-lg flex items-center gap-2.5"
           >
             <span className="h-2 w-2 rounded-full bg-[#7BB88F] shrink-0" />
             <span className="truncate">{pdfToast}</span>
@@ -551,7 +868,7 @@ export default function App() {
         {/* Persistent Cross-Tab Floating Mini-Timer Pill */}
         <FloatingFocusMiniPill
           visible={activeView !== 'focus'}
-          onOpenFocus={() => setActiveView('focus')}
+          onOpenFocus={() => navigateTo('focus')}
         />
       </div>
 

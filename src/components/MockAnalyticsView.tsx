@@ -448,11 +448,11 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
           </div>
 
           {/* Mode Toggle Pills */}
-          <div className="inline-flex items-center rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#130F0D] p-1 self-start md:self-auto shrink-0">
+          <div className="flex flex-nowrap items-center rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#130F0D] p-1 self-start md:self-auto shrink-0 max-w-full overflow-x-auto no-scrollbar">
             <button
               type="button"
               onClick={() => handleSwitchMode('paste')}
-              className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
+              className={`shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
                 loggerMode === 'paste'
                   ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-white shadow-sm'
                   : 'text-[#61554D] dark:text-[#A99B8E] hover:text-[#1C1613] dark:hover:text-[#F5F0E8]'
@@ -464,7 +464,7 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
             <button
               type="button"
               onClick={() => handleSwitchMode('manual')}
-              className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
+              className={`shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
                 loggerMode === 'manual'
                   ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-white shadow-sm'
                   : 'text-[#61554D] dark:text-[#A99B8E] hover:text-[#1C1613] dark:hover:text-[#F5F0E8]'
@@ -1136,8 +1136,12 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
 
       {/* 2. FILTER PILLS + 5-KPI EXECUTIVE TELEMETRY STRIP */}
       <section className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+          <div
+            role="tablist"
+            aria-label="Filter mock tests by type"
+            className="flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 -mx-1"
+          >
             {(
               [
                 { id: 'all', label: 'All Tests', count: allCounts.all },
@@ -1151,8 +1155,17 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
                 <button
                   key={pill.id}
                   type="button"
-                  onClick={() => setTypeFilter(pill.id)}
-                  className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                  role="tab"
+                  aria-selected={active}
+                  onClick={(e) => {
+                    setTypeFilter(pill.id);
+                    e.currentTarget.scrollIntoView({
+                      behavior: 'smooth',
+                      inline: 'center',
+                      block: 'nearest',
+                    });
+                  }}
+                  className={`shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
                     active
                       ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-white shadow-sm'
                       : 'border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] text-[#61554D] dark:text-[#A99B8E] hover:border-[#C89216]'
@@ -1172,19 +1185,19 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
               );
             })}
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-[11px] font-mono text-[#8C7E75] dark:text-[#A99B8E]">
-              All scores normalized to 100% scale for apples-to-apples comparison
+          <div className="flex items-center justify-between md:justify-end gap-3 shrink-0">
+            <span className="text-[11px] font-mono text-[#8C7E75] dark:text-[#A99B8E] truncate">
+              Scores normalized to 100%
             </span>
             {onExportMockPdf && (
               <button
                 type="button"
                 onClick={onExportMockPdf}
                 data-testid="mock-export-pdf-btn"
-                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-full bg-[#FDF6E3] dark:bg-[#2C2215] border border-[#EED89A] dark:border-[#5C441B] text-[#6E261A] dark:text-[#E0A92E] text-xs font-bold hover:border-[#C89216] press-tactile"
+                className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full bg-[#FDF6E3] dark:bg-[#2C2215] border border-[#EED89A] dark:border-[#5C441B] text-[#6E261A] dark:text-[#E0A92E] text-xs font-bold hover:border-[#C89216] press-tactile"
               >
                 <FileDown className="h-3.5 w-3.5" />
-                Export Mock PDF
+                Export PDF
               </button>
             )}
           </div>

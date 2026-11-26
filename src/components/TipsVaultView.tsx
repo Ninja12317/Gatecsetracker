@@ -175,12 +175,12 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="flex flex-nowrap sm:flex-wrap items-center gap-2 overflow-x-auto no-scrollbar py-0.5 px-1 -mx-1 sm:mx-0 sm:px-0 shrink-0">
             <select
               value={genSubject}
               onChange={(e) => setGenSubject(e.target.value as SubjectId | 'all')}
               aria-label="Choose subject for fresh traps generation"
-              className="h-10 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#130F0D] px-3.5 text-xs font-medium text-[#1C1613] dark:text-[#F5F0E8]"
+              className="shrink-0 h-10 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#130F0D] px-3.5 text-xs font-medium text-[#1C1613] dark:text-[#F5F0E8]"
             >
               <option value="all">Weakest Subjects (Auto)</option>
               {GATE_2027_SYLLABUS.map((s) => (
@@ -201,7 +201,7 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
                 })
               }
               data-testid="generate-fresh-traps-btn"
-              className="inline-flex items-center gap-2 h-10 px-4 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] text-white text-xs font-semibold disabled:opacity-60 press-tactile whitespace-nowrap"
+              className="shrink-0 inline-flex items-center gap-2 h-10 px-4 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] text-white text-xs font-semibold disabled:opacity-60 press-tactile whitespace-nowrap"
             >
               {trapsGenerating ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -226,7 +226,7 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
                 })
               }
               data-testid="mine-mistakes-traps-btn"
-              className="inline-flex items-center gap-1.5 h-10 px-4 rounded-full bg-[#FDF6E3] hover:bg-[#F7EAC2] dark:bg-[#2C2215] dark:hover:bg-[#3A2D1B] border border-[#EED89A] dark:border-[#5C441B] text-[#6E261A] dark:text-[#E0A92E] text-xs font-semibold disabled:opacity-60 press-tactile whitespace-nowrap"
+              className="shrink-0 inline-flex items-center gap-1.5 h-10 px-4 rounded-full bg-[#FDF6E3] hover:bg-[#F7EAC2] dark:bg-[#2C2215] dark:hover:bg-[#3A2D1B] border border-[#EED89A] dark:border-[#5C441B] text-[#6E261A] dark:text-[#E0A92E] text-xs font-semibold disabled:opacity-60 press-tactile whitespace-nowrap"
             >
               <AlertTriangle className="w-3.5 h-3.5" />
               Mine From My Mistakes ({unresolvedMistakesCount})
@@ -335,7 +335,11 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Tip categories">
+        <div
+          className="flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 -mx-1"
+          role="tablist"
+          aria-label="Tip categories"
+        >
           {(['All', 'Exam Trap', 'Formula', 'Shortcut', 'Edge Case', 'Bookmarked'] as const).map(
             (cat) => {
               const active = categoryFilter === cat;
@@ -345,8 +349,11 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
                   type="button"
                   role="tab"
                   aria-selected={active}
-                  onClick={() => setCategoryFilter(cat)}
-                  className={`px-4 py-1.5 rounded-full text-xs font-semibold press-tactile whitespace-nowrap ${
+                  onClick={(e) => {
+                    setCategoryFilter(cat);
+                    e.currentTarget.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                  }}
+                  className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold press-tactile whitespace-nowrap ${
                     active
                       ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-[#FAF8F4]'
                       : 'bg-[#FAF8F4] dark:bg-[#241D19] text-[#61554D] dark:text-[#A99B8E] border border-[#E8E0D5] dark:border-[#2E2520] hover:text-[#1C1613] dark:hover:text-[#F5F0E8]'

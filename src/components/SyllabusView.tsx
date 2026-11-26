@@ -177,32 +177,45 @@ export const SyllabusView: React.FC<SyllabusViewProps> = ({
           </div>
         </div>
 
-        {/* Segmented Filter Pills */}
-        <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Syllabus filters">
-          {[
-            { id: 'all' as const, label: `All (${counts.total})` },
-            { id: 'high_roi_weak' as const, label: `High-ROI Weak Areas (${counts.highRoiWeak})` },
-            { id: 'needs_revision' as const, label: `Needs Revision (${counts.revDue})` },
-            { id: 'incomplete' as const, label: `Incomplete (${counts.incomplete})` },
-          ].map((tab) => {
-            const active = filter === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => setFilter(tab.id)}
-                className={`px-4 py-1.5 rounded-full text-xs font-semibold press-tactile whitespace-nowrap ${
-                  active
-                    ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-[#FAF8F4]'
-                    : 'bg-[#FAF8F4] dark:bg-[#241D19] text-[#61554D] dark:text-[#A99B8E] border border-[#E8E0D5] dark:border-[#2E2520] hover:text-[#1C1613] dark:hover:text-[#F5F0E8]'
-                }`}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
+        {/* Segmented Filter Pills (Single-row horizontal rail on mobile) */}
+        <div className="mobile-rail-fade">
+          <div
+            className="flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 -mx-1"
+            role="tablist"
+            aria-label="Syllabus filters"
+          >
+            {[
+              { id: 'all' as const, label: `All (${counts.total})` },
+              { id: 'high_roi_weak' as const, label: `High-ROI Weak (${counts.highRoiWeak})` },
+              { id: 'needs_revision' as const, label: `Needs Revision (${counts.revDue})` },
+              { id: 'incomplete' as const, label: `Incomplete (${counts.incomplete})` },
+            ].map((tab) => {
+              const active = filter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={(e) => {
+                    setFilter(tab.id);
+                    e.currentTarget.scrollIntoView({
+                      behavior: 'smooth',
+                      inline: 'center',
+                      block: 'nearest',
+                    });
+                  }}
+                  className={`shrink-0 whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-semibold press-tactile ${
+                    active
+                      ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-[#FAF8F4]'
+                      : 'bg-[#FAF8F4] dark:bg-[#241D19] text-[#61554D] dark:text-[#A99B8E] border border-[#E8E0D5] dark:border-[#2E2520] hover:text-[#1C1613] dark:hover:text-[#F5F0E8]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

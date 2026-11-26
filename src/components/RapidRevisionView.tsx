@@ -230,41 +230,44 @@ export const RapidRevisionView: React.FC<RapidRevisionViewProps> = ({
         </div>
       </section>
 
-      {/* Deck Selector Pills */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex items-center p-1 rounded-full bg-[#EFE9DF] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520]">
-          {[
-            { id: 'due' as const, label: `Due Today (${dueCount})`, icon: Clock },
-            { id: 'mistakes' as const, label: `Mistake Bucket (${mistakeCount})`, icon: AlertTriangle },
-            { id: 'traps' as const, label: `Saved Traps (${trapCount})`, icon: Sparkles },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const active = deckFilter === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => {
-                  setDeckFilter(tab.id);
-                  setCursor(0);
-                  setFlipped(false);
-                }}
-                className={`px-3.5 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all press-tactile ${
-                  active
-                    ? 'bg-white dark:bg-[#1C1714] text-[#6E261A] dark:text-[#E0A92E] shadow-sm font-semibold'
-                    : 'text-[#61554D] dark:text-[#A99B8E] hover:text-[#1C1613] dark:hover:text-[#F5F0E8]'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {tab.label}
-              </button>
-            );
-          })}
+      {/* Deck Selector Pills — Single-Row Horizontally Scrollable Rail */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+        <div className="w-full sm:w-auto overflow-x-auto no-scrollbar py-1 px-1 -mx-1 sm:mx-0 sm:px-0">
+          <div className="inline-flex flex-nowrap items-center gap-1 p-1 rounded-full bg-[#EFE9DF] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520]">
+            {[
+              { id: 'due' as const, label: `Due Today (${dueCount})`, icon: Clock },
+              { id: 'mistakes' as const, label: `Mistake Bucket (${mistakeCount})`, icon: AlertTriangle },
+              { id: 'traps' as const, label: `Saved Traps (${trapCount})`, icon: Sparkles },
+            ].map((tab) => {
+              const Icon = tab.icon;
+              const active = deckFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={(e) => {
+                    setDeckFilter(tab.id);
+                    setCursor(0);
+                    setFlipped(false);
+                    e.currentTarget.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                  }}
+                  className={`shrink-0 whitespace-nowrap px-3.5 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all press-tactile ${
+                    active
+                      ? 'bg-white dark:bg-[#1C1714] text-[#6E261A] dark:text-[#E0A92E] shadow-sm font-semibold'
+                      : 'text-[#61554D] dark:text-[#A99B8E] hover:text-[#1C1613] dark:hover:text-[#F5F0E8]'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5 shrink-0" />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {activeCard && (
-          <span className="text-xs font-mono text-[#61554D] dark:text-[#A99B8E] tabular-nums">
-            Card {safeIdx + 1} / {deck.length} · Space to flip · 1/2/3 to rate
+          <span className="text-xs font-mono text-[#61554D] dark:text-[#A99B8E] tabular-nums shrink-0">
+            Card {safeIdx + 1} / {deck.length} · <span className="hidden sm:inline">Space to flip · 1/2/3 to rate</span><span className="sm:hidden">Tap to flip</span>
           </span>
         )}
       </div>

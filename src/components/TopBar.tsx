@@ -3,9 +3,11 @@ import {
   Menu,
   LogIn,
   Search,
+  ArrowLeft,
 } from 'lucide-react';
 import type { AuthUserSummary, ContentWidthMode, NavView, SyncStatus } from '../types';
 import { useFocusTimer } from '../context/FocusTimerContext';
+import { VIEW_HEADER_TITLES } from '../utils/mobileNav';
 
 interface TopBarProps {
   activeView: NavView;
@@ -15,6 +17,9 @@ interface TopBarProps {
   quotaNotice: string;
   unresolvedMistakesCount: number;
   revisionDueCount: number;
+  showBackButton?: boolean;
+  mobileTitle?: string;
+  onBack?: () => void;
   onSelectView: (view: NavView) => void;
   onSignInGoogle: () => void;
   onOpenCommandPalette: () => void;
@@ -40,6 +45,9 @@ export const TopBar: React.FC<TopBarProps> = ({
   quotaNotice,
   unresolvedMistakesCount,
   revisionDueCount,
+  showBackButton = false,
+  mobileTitle,
+  onBack,
   onSelectView,
   onSignInGoogle,
   onOpenCommandPalette,
@@ -94,17 +102,64 @@ export const TopBar: React.FC<TopBarProps> = ({
       ? 'bg-[#B83227] dark:bg-[#E05D52]'
       : 'bg-[#A99B8E] dark:bg-[#6E6057]';
 
+  const syncTitle =
+    syncStatus === 'synced'
+      ? 'Firestore cloud synced'
+      : syncStatus === 'connecting'
+      ? 'Syncing workspace...'
+      : syncStatus === 'error'
+      ? 'Sync error'
+      : 'Local mode';
+
   const containerMaxClass = contentWidth === 'wide' ? 'max-w-[1536px]' : 'max-w-[1280px]';
+  const resolvedMobileTitle = mobileTitle || VIEW_HEADER_TITLES[activeView] || "GATE '27";
 
   return (
-    <header className="no-print sticky top-0 z-30 border-b border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4]/95 dark:bg-[#130F0D]/95">
-      <div className={`${containerMaxClass} mx-auto flex h-16 items-center justify-between gap-3 px-4 sm:px-6 transition-[max-width] duration-200`}>
-        {/* Left: Squircle Brand Badge + GATE '27 Wordmark */}
-        <div className="flex items-center gap-2.5 shrink-0">
+    <header className="no-print sticky top-0 z-30 border-b border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4]/95 dark:bg-[#130F0D]/95 backdrop-blur-md">
+      <div
+        className={`${containerMaxClass} mx-auto flex flex-nowrap h-14 md:h-16 items-center justify-between gap-2 md:gap-3 px-3 md:px-6 transition-[max-width] duration-200`}
+      >
+        {/* Left Zone: Mobile Contextual Back OR Logo + Truncated Title; Desktop Brand Badge */}
+        <div className="min-w-0 flex items-center gap-2 shrink md:shrink-0">
+          {/* Mobile-only Left Lockup (< 768px) */}
+          <div className="flex md:hidden items-center gap-2 min-w-0">
+            {showBackButton && onBack ? (
+              <button
+                type="button"
+                onClick={onBack}
+                data-testid="mobile-contextual-back-btn"
+                aria-label="Go back"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] text-[#1C1613] dark:text-[#F5F0E8] hover:border-[#6E261A] dark:hover:border-[#E0A92E] active:scale-95 transition-transform shadow-xs"
+              >
+                <ArrowLeft className="h-4 w-4" strokeWidth={2.3} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onSelectView('dashboard')}
+                className="flex items-center gap-2 min-w-0 press-tactile"
+                aria-label="Go to GATE '27 Overview"
+              >
+                <img
+                  src="/icon.svg"
+                  alt="GATE CSE '27 Emblem"
+                  className="h-8 w-8 rounded-[11px] squircle shadow-xs border border-[#C89216]/40 object-cover shrink-0"
+                />
+              </button>
+            )}
+            <span
+              data-testid="mobile-header-title"
+              className="font-display text-[15px] font-bold tracking-[-0.025em] text-[#1C1613] dark:text-[#F5F0E8] truncate"
+            >
+              {resolvedMobileTitle}
+            </span>
+          </div>
+
+          {/* Desktop Brand Lockup (>= 768px — strictly preserved) */}
           <button
             type="button"
             onClick={() => onSelectView('dashboard')}
-            className="flex items-center gap-2.5 group press-tactile"
+            className="hidden md:flex items-center gap-2.5 group press-tactile shrink-0"
             aria-label="Go to GATE '27 Overview"
           >
             <img
@@ -116,14 +171,14 @@ export const TopBar: React.FC<TopBarProps> = ({
               <span className="font-display text-[15px] font-bold tracking-[-0.03em] text-[#1C1613] dark:text-[#F5F0E8]">
                 GATE &apos;27
               </span>
-              <span className="mt-0.5 text-[10px] font-medium text-[#61554D] dark:text-[#A99B8E] hidden sm:inline">
+              <span className="mt-0.5 text-[10px] font-medium text-[#61554D] dark:text-[#A99B8E]">
                 IITM CSE War Room
               </span>
             </span>
           </button>
         </div>
 
-        {/* Center: Floating Segmented Pill Navigation with Pure-GPU Sliding Highlight */}
+        {/* Center: Floating Segmented Pill Navigation (Desktop lg+ only, hidden on mobile) */}
         <nav
           ref={navContainerRef}
           aria-label="Primary navigation"
@@ -187,14 +242,14 @@ export const TopBar: React.FC<TopBarProps> = ({
           })}
         </nav>
 
-        {/* Right: Clean Decluttered Actions + Far Top-Right Circular 3-Line Hamburger Menu */}
+        {/* Right Zone: Mobile = tiny sync dot + Hamburger; Desktop = ⌘K + Profile/Sign-In + Hamburger */}
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={onOpenCommandPalette}
             aria-label="Open quick search command palette"
             title="Quick Jump (⌘K)"
-            className="hidden sm:inline-flex items-center gap-1.5 h-9 px-3 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] text-xs font-medium text-[#61554D] dark:text-[#A99B8E] hover:text-[#1C1613] dark:hover:text-[#F5F0E8] hover:border-[#D4C7B7] dark:hover:border-[#42352E] press-tactile"
+            className="hidden md:inline-flex items-center gap-1.5 h-9 px-3 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] text-xs font-medium text-[#61554D] dark:text-[#A99B8E] hover:text-[#1C1613] dark:hover:text-[#F5F0E8] hover:border-[#D4C7B7] dark:hover:border-[#42352E] press-tactile"
           >
             <Search className="h-3.5 w-3.5" />
             <kbd className="font-mono text-[10px] text-[#8C7E75] dark:text-[#9A8B7E]">⌘K</kbd>
@@ -205,7 +260,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               type="button"
               onClick={onOpenDrawer}
               title={`Signed in as ${user.email} · Open menu`}
-              className="hidden sm:flex items-center gap-1.5 h-9 pl-1.5 pr-3 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] hover:border-[#C89216] press-tactile"
+              className="hidden md:flex items-center gap-1.5 h-9 pl-1.5 pr-3 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] hover:border-[#C89216] press-tactile"
             >
               {user.photoURL ? (
                 <img
@@ -220,7 +275,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 </span>
               )}
               <span className={`h-2 w-2 rounded-full ${syncDotColor}`} aria-hidden="true" />
-              <span className="hidden md:inline text-xs font-medium text-[#1C1613] dark:text-[#F5F0E8] max-w-[88px] truncate">
+              <span className="text-xs font-medium text-[#1C1613] dark:text-[#F5F0E8] max-w-[88px] truncate">
                 {user.displayName.split(' ')[0]}
               </span>
             </button>
@@ -229,12 +284,20 @@ export const TopBar: React.FC<TopBarProps> = ({
               type="button"
               onClick={onSignInGoogle}
               data-testid="google-signin-btn"
-              className="hidden sm:inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] dark:hover:bg-[#B54A38] text-[#FAF8F4] text-xs font-semibold press-tactile whitespace-nowrap shrink-0"
+              className="hidden md:inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] dark:hover:bg-[#B54A38] text-[#FAF8F4] text-xs font-semibold press-tactile whitespace-nowrap shrink-0"
             >
               <LogIn className="h-3.5 w-3.5" />
               <span>Sign In</span>
             </button>
           )}
+
+          {/* Mobile-only tiny sync status dot beside Hamburger */}
+          <span
+            title={syncTitle}
+            aria-label={syncTitle}
+            data-testid="mobile-sync-dot"
+            className={`md:hidden h-2.5 w-2.5 rounded-full shrink-0 ${syncDotColor}`}
+          />
 
           {/* Far Top-Right Tactile Circular 3-Line Hamburger Button (Desktop + Mobile) */}
           <button
@@ -243,7 +306,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             data-testid="top-right-hamburger-btn"
             aria-label="Open navigation and utility menu"
             title="Open Navigation & Utility Drawer"
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] text-[#1C1613] dark:text-[#F5F0E8] hover:border-[#6E261A] dark:hover:border-[#E0A92E] hover:text-[#6E261A] dark:hover:text-[#E0A92E] shadow-xs press-tactile shrink-0"
+            className="flex h-9 w-9 md:h-10 md:w-10 items-center justify-center rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] text-[#1C1613] dark:text-[#F5F0E8] hover:border-[#6E261A] dark:hover:border-[#E0A92E] hover:text-[#6E261A] dark:hover:text-[#E0A92E] shadow-xs press-tactile shrink-0"
           >
             <Menu className="h-[18px] w-[18px]" strokeWidth={2.2} />
           </button>

@@ -37,6 +37,7 @@ import {
   formatPaceDuration,
   isSlowPaceQuestion,
 } from '../utils/examPolish';
+import { computePyqBottomFooterState } from '../utils/mobileNav';
 import { SketchpadStudioPanel } from './SketchpadStudioPanel';
 import { CodeBlock } from './CodeBlock';
 import { RichQuestionContent } from './RichQuestionContent';
@@ -173,6 +174,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
   const [manualKeyDrafts, setManualKeyDrafts] = useState<Record<string, string>>({});
   const [manualKeySaved, setManualKeySaved] = useState<Record<string, boolean>>({});
   const [mobilePaletteOpen, setMobilePaletteOpen] = useState(false);
+  const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
 
   // Merge latest verifiedAnswers onto session questions dynamically without resetting session state
   const liveQuestions = useMemo(() => {
@@ -312,7 +314,8 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
   const updateResponse = useCallback(
     (questionId: string, patch: UserResponse) => {
       setSession((prev) => {
-        if (!prev) return prev;
+        if (!prev || prev.finished) return prev;
+        if (prev.mode === 'cbt_mock' && prev.secondsRemaining <= 0) return prev;
         if (prev.mode === 'practice_sprint' && prev.checked[questionId]) return prev;
         return {
           ...prev,
@@ -858,6 +861,44 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
     return { answered, markedOnly, answeredAndMarked, notAnswered };
   }, [liveQuestions, session.responses, session.markedForReview]);
 
+  const totalAnsweredCount = paletteStats.answered + paletteStats.answeredAndMarked;
+  const footerState = useMemo(
+    () =>
+      computePyqBottomFooterState({
+        currentIndex: session.currentIndex,
+        totalQuestions: liveQuestions.length,
+        answeredCount: totalAnsweredCount,
+        isTimedMock,
+        secondsRemaining: session.secondsRemaining,
+        finished: session.finished,
+      }),
+    [
+      session.currentIndex,
+      liveQuestions.length,
+      totalAnsweredCount,
+      isTimedMock,
+      session.secondsRemaining,
+      session.finished,
+    ]
+  );
+
+  const handleRequestSubmit = useCallback(() => {
+    if (footerState.needsSubmitConfirm) {
+      setSubmitConfirmOpen(true);
+    } else {
+      setSubmitConfirmOpen(false);
+      handleFinishSession();
+    }
+  }, [footerState.needsSubmitConfirm, handleFinishSession]);
+
+  const handleJumpToFirstUnanswered = useCallback(() => {
+    const idx = liveQuestions.findIndex((q) => !hasAnswerResponse(session.responses[q.id]));
+    setSubmitConfirmOpen(false);
+    if (idx !== -1) {
+      jumpToIndex(idx);
+    }
+  }, [liveQuestions, session.responses, jumpToIndex]);
+
   // ===================== SUBMIT & SCORE REPORT SCREEN =====================
   if (session.finished) {
     const results = liveQuestions.map((q) => {
@@ -1092,7 +1133,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
     (currentQ.format === 'MCQ' || currentQ.format === 'MSQ') &&
     currentQ.optionsExtracted === false;
 
-  const isLocked = !isTimedMock && Boolean(currentEval);
+  const isLocked = footerState.isFrozen || (!isTimedMock && Boolean(currentEval));
   const currentQSeconds = session.questionSeconds?.[currentQ.id] ?? 0;
   const isCurrentQSlow = isSlowPaceQuestion(currentQ.marks, currentQSeconds);
   const showPacePill = state.settings.showLivePaceTimer ?? true;
@@ -1117,26 +1158,44 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
   };
 
   return (
-    <div className="space-y-4 pb-20 lg:pb-0">
-      {/* CBT Exam Hall Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-[24px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] px-4 sm:px-5 py-3 shadow-warm">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <button
-            type="button"
-            onClick={onExit}
-            className="px-3 py-1 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#61554D] hover:text-[#1C1613] dark:text-[#D8CBB8] dark:hover:text-[#F5F0E8] whitespace-nowrap press-tactile"
+    <div className="space-y-4 pb-28 lg:pb-6" data-no-swipe="true">
+      {/* CBT Exam Hall Header Bar (Single-row horizontally scrollable utilities on mobile) */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 rounded-[24px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] px-3.5 sm:px-5 py-2.5 sm:py-3 shadow-warm">
+        <div className="flex items-center justify-between md:justify-start gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={onExit}
+              className="px-3 py-1 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#61554D] hover:text-[#1C1613] dark:text-[#D8CBB8] dark:hover:text-[#F5F0E8] whitespace-nowrap shrink-0 press-tactile"
+            >
+              ← Exit
+            </button>
+            <h2 className="font-display text-xs sm:text-sm font-bold text-[#1C1613] dark:text-[#F5F0E8] truncate">
+              {session.title}
+            </h2>
+          </div>
+          <span
+            data-testid="cbt-session-clock-mobile"
+            className={`md:hidden font-mono text-[11px] font-bold tabular-nums px-2.5 py-1 rounded-full shrink-0 whitespace-nowrap ${
+              footerState.isTimeUp
+                ? 'bg-[#B83227] text-white'
+                : isTimedMock && session.secondsRemaining < 300
+                ? 'bg-[#B83227] text-white'
+                : 'bg-[#241914] text-[#FAF5EB]'
+            }`}
           >
-            ← Exit
-          </button>
-          <h2 className="font-display text-sm font-bold text-[#1C1613] dark:text-[#F5F0E8] truncate">
-            {session.title}
-          </h2>
+            {footerState.isTimeUp
+              ? '00:00'
+              : isTimedMock
+              ? formatTimer(session.secondsRemaining)
+              : formatTimer(session.elapsedSeconds)}
+          </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+        <div className="flex flex-nowrap items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-0.5">
           <span
             data-testid="cbt-session-clock"
-            className={`font-mono text-xs font-bold tabular-nums px-3 py-1.5 rounded-full ${
+            className={`hidden md:inline-flex font-mono text-xs font-bold tabular-nums px-3 py-1.5 rounded-full shrink-0 whitespace-nowrap ${
               isTimedMock && session.secondsRemaining < 300
                 ? 'bg-[#B83227] text-white'
                 : 'bg-[#241914] text-[#FAF5EB]'
@@ -1217,14 +1276,43 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
 
           <button
             type="button"
-            onClick={handleFinishSession}
+            onClick={handleRequestSubmit}
             data-testid="submit-cbt-session-btn"
-            className="h-8 px-4 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] text-white text-xs font-semibold press-tactile whitespace-nowrap"
+            className="h-8 px-4 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] text-white text-xs font-semibold press-tactile whitespace-nowrap shrink-0"
           >
             {isTimedMock ? 'Submit' : 'Finish'}
           </button>
         </div>
       </div>
+
+      {/* Timer Ended (00:00) Immediate Freeze & Unmistakable Submit Banner */}
+      {footerState.isTimeUp && (
+        <div
+          data-testid="cbt-time-up-banner"
+          role="alert"
+          className="rounded-[24px] squircle border-2 border-[#C89216] dark:border-[#E0A92E] bg-[#FDF6E3] dark:bg-[#2C2215] px-4 sm:px-5 py-4 shadow-warm flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        >
+          <div className="space-y-0.5">
+            <div className="inline-flex items-center gap-1.5 text-xs font-bold text-[#B83227] dark:text-[#F08A80]">
+              <Clock className="h-4 w-4" />
+              Timer Reached 00:00 — Responses Locked
+            </div>
+            <p className="text-xs text-[#61554D] dark:text-[#D8CBB8]">
+              Answered {footerState.answeredCount}/{footerState.totalQuestions} · Unanswered{' '}
+              {footerState.unansweredCount}. Submit now to inspect your score, negative marking breakdown, and PDF export.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleFinishSession}
+            data-testid="time-up-submit-cta"
+            className="inline-flex items-center justify-center gap-1.5 h-10 px-5 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#E0A92E] dark:text-[#1C1613] text-[#FAF8F4] text-xs font-bold shadow-sm press-tactile whitespace-nowrap shrink-0"
+          >
+            <Check className="h-4 w-4" />
+            Time&apos;s Up — Submit &amp; View Score ✓
+          </button>
+        </div>
+      )}
 
       {/* Main Responsive Split Grid: Question + Sketchpad / GATE CBT Palette Sidebar */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
@@ -1544,77 +1632,165 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
             </div>
           )}
 
-          {/* Action Footer Controls */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-4 border-t border-[#E8E0D5] dark:border-[#2E2520]">
-            <div className="flex flex-wrap items-center gap-2">
-              {isTimedMock ? (
-                <>
+          {/* Secondary Question Action Row (Check / Clear / Mark & Next) */}
+          <div className="flex flex-nowrap items-center gap-2 overflow-x-auto no-scrollbar pt-3 border-t border-[#E8E0D5] dark:border-[#2E2520]">
+            {isTimedMock ? (
+              <>
+                <button
+                  type="button"
+                  disabled={footerState.isFrozen}
+                  onClick={() => toggleMarkForReview(currentQ.id, !footerState.isLastQuestion)}
+                  className="shrink-0 whitespace-nowrap h-9 px-4 rounded-full border border-[#C89216] bg-[#FDF6E3] dark:bg-[#2C2215] text-xs font-semibold text-[#8B6209] dark:text-[#E0A92E] disabled:opacity-40 press-tactile"
+                >
+                  Mark for Review{!footerState.isLastQuestion ? ' & Next' : ''}
+                </button>
+                <button
+                  type="button"
+                  disabled={footerState.isFrozen}
+                  onClick={() => updateResponse(currentQ.id, {})}
+                  className="shrink-0 whitespace-nowrap h-9 px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] text-xs font-semibold text-[#61554D] dark:text-[#A99B8E] disabled:opacity-40"
+                >
+                  Clear Response
+                </button>
+              </>
+            ) : (
+              <>
+                {!currentEval && (
                   <button
                     type="button"
-                    onClick={() => jumpToIndex(session.currentIndex + 1)}
-                    className="h-9 px-5 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] text-white text-xs font-semibold press-tactile"
+                    disabled={footerState.isFrozen}
+                    onClick={() => handleCheckPracticeQuestion(currentQ)}
+                    data-testid="check-answer-btn"
+                    className="shrink-0 whitespace-nowrap h-9 px-5 rounded-full bg-[#241914] hover:bg-[#33241D] dark:bg-[#E0A92E] dark:text-[#1C1613] text-[#FAF8F4] text-xs font-semibold disabled:opacity-40 press-tactile"
                   >
-                    Save &amp; Next
+                    {hasVerifiedKey ? 'Check Answer' : 'Check & Reveal Solutions'}
                   </button>
+                )}
+                {!currentEval && (
                   <button
                     type="button"
-                    onClick={() => toggleMarkForReview(currentQ.id, true)}
-                    className="h-9 px-4 rounded-full border border-[#C89216] bg-[#FDF6E3] dark:bg-[#2C2215] text-xs font-semibold text-[#8B6209] dark:text-[#E0A92E] press-tactile"
-                  >
-                    Mark for Review &amp; Next
-                  </button>
-                  <button
-                    type="button"
+                    disabled={footerState.isFrozen}
                     onClick={() => updateResponse(currentQ.id, {})}
-                    className="h-9 px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] text-xs font-semibold text-[#61554D] dark:text-[#A99B8E]"
+                    className="shrink-0 whitespace-nowrap h-9 px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] text-xs font-semibold text-[#61554D] dark:text-[#A99B8E] disabled:opacity-40"
                   >
-                    Clear Response
+                    Clear
                   </button>
-                </>
-              ) : (
-                <>
-                  {!currentEval && (
-                    <button
-                      type="button"
-                      onClick={() => handleCheckPracticeQuestion(currentQ)}
-                      data-testid="check-answer-btn"
-                      className="h-9 px-5 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] dark:hover:bg-[#B54A38] text-white text-xs font-semibold press-tactile"
-                    >
-                      {hasVerifiedKey ? 'Check Answer' : 'Check & Reveal Solutions'}
-                    </button>
-                  )}
-                  {!currentEval && (
-                    <button
-                      type="button"
-                      onClick={() => updateResponse(currentQ.id, {})}
-                      className="h-9 px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] text-xs font-semibold text-[#61554D] dark:text-[#A99B8E]"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
+                )}
+              </>
+            )}
+          </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                disabled={session.currentIndex === 0}
-                onClick={() => jumpToIndex(session.currentIndex - 1)}
-                className="inline-flex items-center gap-1 h-9 px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] hover:bg-[#FAF8F4] dark:hover:bg-[#241D19] disabled:opacity-40 press-tactile"
+          {/* Sticky Curved Bottom Question Footer (Desktop & Tablet Inside Card) */}
+          <div
+            data-testid="pyq-bottom-question-footer"
+            className="rounded-[22px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] px-3.5 sm:px-4 py-3 space-y-2.5"
+          >
+            {/* Micro-count progress line on Last Question or Time's Up */}
+            {(footerState.isLastQuestion || footerState.isTimeUp) && (
+              <div
+                data-testid="pyq-footer-micro-count"
+                className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums text-[#61554D] dark:text-[#D8CBB8] pb-2 border-b border-[#E8E0D5]/80 dark:border-[#352A24]"
               >
-                <ChevronLeft className="h-3.5 w-3.5" />
-                Prev (P)
-              </button>
-              <button
-                type="button"
-                disabled={session.currentIndex === liveQuestions.length - 1}
-                onClick={() => jumpToIndex(session.currentIndex + 1)}
-                className="inline-flex items-center gap-1 h-9 px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] hover:bg-[#FAF8F4] dark:hover:bg-[#241D19] disabled:opacity-40 press-tactile"
-              >
-                Next (N)
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
+                <span>
+                  {footerState.isTimeUp ? "Time's Up — Ready to Grade" : 'Final Question Reached'}
+                </span>
+                <span className="font-semibold text-[#6E261A] dark:text-[#E0A92E]">
+                  Answered {footerState.answeredCount}/{footerState.totalQuestions} · Unanswered{' '}
+                  {footerState.unansweredCount}
+                </span>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {/* Left: Prev + Mark + Bookmark */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={footerState.isFirstQuestion}
+                  onClick={() => jumpToIndex(session.currentIndex - 1)}
+                  data-testid="pyq-footer-prev-btn"
+                  className="inline-flex items-center gap-1 h-10 px-3.5 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FFFFFF] dark:bg-[#1C1714] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] hover:border-[#C89216] disabled:opacity-40 press-tactile whitespace-nowrap"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  Prev
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => toggleMarkForReview(currentQ.id, false)}
+                  aria-label={isMarked ? 'Unmark for review' : 'Mark for review'}
+                  aria-pressed={isMarked}
+                  title="Mark for review"
+                  className={`inline-flex h-10 w-10 items-center justify-center rounded-full border press-tactile ${
+                    isMarked
+                      ? 'border-[#C89216] bg-[#FDF6E3] dark:bg-[#332714] text-[#8B6209] dark:text-[#E0A92E]'
+                      : 'border-[#E8E0D5] dark:border-[#352A24] bg-[#FFFFFF] dark:bg-[#1C1714] text-[#61554D] dark:text-[#A99B8E]'
+                  }`}
+                >
+                  <Flag className="h-3.5 w-3.5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onToggleBookmark(currentQ.id)}
+                  aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark question'}
+                  aria-pressed={isBookmarked}
+                  title="Bookmark (B)"
+                  className={`inline-flex h-10 w-10 items-center justify-center rounded-full border press-tactile ${
+                    isBookmarked
+                      ? 'border-[#C89216] bg-[#FDF6E3] dark:bg-[#332714] text-[#8B6209] dark:text-[#E0A92E]'
+                      : 'border-[#E8E0D5] dark:border-[#352A24] bg-[#FFFFFF] dark:bg-[#1C1714] text-[#61554D] dark:text-[#A99B8E]'
+                  }`}
+                >
+                  <Bookmark className={`h-3.5 w-3.5 ${isBookmarked ? 'fill-current' : ''}`} />
+                </button>
+              </div>
+
+              {/* Right: Next -> + Submit Test (upgraded on Last Question or Time's Up) */}
+              <div className="flex flex-wrap items-center gap-2">
+                {footerState.isTimeUp ? (
+                  <button
+                    type="button"
+                    onClick={handleFinishSession}
+                    data-testid="pyq-footer-submit-btn"
+                    className="inline-flex items-center gap-1.5 h-10 px-5 rounded-full bg-[#C89216] hover:bg-[#B28012] dark:bg-[#E0A92E] text-[#1C1613] text-xs font-bold shadow-sm press-tactile whitespace-nowrap"
+                  >
+                    <Check className="h-4 w-4" />
+                    Time&apos;s Up — Submit &amp; View Score ✓
+                  </button>
+                ) : footerState.isLastQuestion ? (
+                  <button
+                    type="button"
+                    onClick={handleRequestSubmit}
+                    data-testid="pyq-footer-submit-btn"
+                    className="inline-flex items-center gap-1.5 h-10 px-5 rounded-full bg-[#C89216] hover:bg-[#B28012] dark:bg-[#E0A92E] text-[#1C1613] text-xs font-bold shadow-sm press-tactile whitespace-nowrap"
+                  >
+                    <Check className="h-4 w-4" />
+                    Submit Test &amp; View Score ✓
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => jumpToIndex(session.currentIndex + 1)}
+                      data-testid="pyq-footer-next-btn"
+                      className="inline-flex items-center gap-1 h-10 px-5 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] dark:hover:bg-[#B54A38] text-[#FAF8F4] text-xs font-semibold shadow-xs press-tactile whitespace-nowrap"
+                    >
+                      {isTimedMock ? 'Save & Next' : 'Next'}
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleRequestSubmit}
+                      data-testid="pyq-footer-submit-btn"
+                      className="inline-flex items-center gap-1.5 h-10 px-4 rounded-full border border-[#6E261A] dark:border-[#E0A92E] bg-[#FFFFFF] dark:bg-[#1C1714] text-[#6E261A] dark:text-[#E0A92E] hover:bg-[#F8EAE6] dark:hover:bg-[#2C2215] text-xs font-semibold press-tactile whitespace-nowrap"
+                    >
+                      Submit Test
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1780,64 +1956,194 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
         </div>
       )}
 
-      {/* Sticky Thumb-Friendly Mobile Bottom CBT Action Bar (< lg) */}
+      {/* Lightweight Curved Confirmation Sheet when Unanswered Questions Remain */}
+      {submitConfirmOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#130F0D]/60 backdrop-blur-[2px] p-3 sm:p-4"
+          onClick={() => setSubmitConfirmOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirm Test Submission"
+            data-testid="submit-confirm-sheet"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-5 sm:p-6 shadow-warm-lg space-y-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[#C89216] dark:text-[#E0A92E]">
+                  Confirm Submission
+                </p>
+                <h3 className="mt-0.5 font-display text-lg font-bold text-[#1C1613] dark:text-[#F5F0E8]">
+                  Submit Test &amp; Generate Score Report?
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSubmitConfirmOpen(false)}
+                aria-label="Close confirmation"
+                className="h-8 w-8 rounded-full bg-[#F4EFE6] dark:bg-[#241D19] flex items-center justify-center text-[#61554D] dark:text-[#A99B8E] shrink-0"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="rounded-[18px] border border-[#B8D7C3] dark:border-[#264D34] bg-[#EBF5EE] dark:bg-[#152B1D] p-3">
+                <div className="text-[11px] font-medium text-[#2E5E3E] dark:text-[#7BB88F]">
+                  Answered
+                </div>
+                <div className="mt-0.5 font-mono text-xl font-bold tabular-nums text-[#1D422A] dark:text-[#8FD1A4]">
+                  {footerState.answeredCount} / {footerState.totalQuestions}
+                </div>
+              </div>
+              <div className="rounded-[18px] border border-[#EED89A] dark:border-[#5C441B] bg-[#FDF6E3] dark:bg-[#2C2215] p-3">
+                <div className="text-[11px] font-medium text-[#8B6209] dark:text-[#E0A92E]">
+                  Unanswered
+                </div>
+                <div className="mt-0.5 font-mono text-xl font-bold tabular-nums text-[#6E261A] dark:text-[#E0A92E]">
+                  {footerState.unansweredCount}
+                </div>
+              </div>
+            </div>
+
+            <p className="text-xs text-[#61554D] dark:text-[#A99B8E] leading-relaxed">
+              You still have <strong className="text-[#1C1613] dark:text-[#F5F0E8]">{footerState.unansweredCount}</strong>{' '}
+              unanswered question{footerState.unansweredCount === 1 ? '' : 's'}. Unattempted questions carry zero negative marking.
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={handleJumpToFirstUnanswered}
+                data-testid="confirm-review-unanswered-btn"
+                className="w-full sm:flex-1 h-11 shrink-0 px-4 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] hover:border-[#C89216] press-tactile"
+              >
+                Review Unanswered
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSubmitConfirmOpen(false);
+                  handleFinishSession();
+                }}
+                data-testid="confirm-submit-now-btn"
+                className="w-full sm:flex-1 h-11 shrink-0 px-4 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] text-white text-xs font-bold press-tactile"
+              >
+                Submit Now ✓
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sticky Curved Thumb-Friendly Mobile Bottom CBT Action Bar (< lg) */}
       <div
         data-testid="mobile-cbt-sticky-bar"
-        className="lg:hidden fixed bottom-0 inset-x-0 z-30 border-t border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF]/95 dark:bg-[#1C1714]/95 px-3 py-2.5 shadow-warm-lg"
+        data-no-swipe="true"
+        className="lg:hidden fixed inset-x-0 z-40 px-3 pointer-events-none"
+        style={{ bottom: 'calc(10px + env(safe-area-inset-bottom))' }}
       >
-        <div className="flex items-center justify-between gap-2 max-w-lg mx-auto">
-          <button
-            type="button"
-            disabled={session.currentIndex === 0}
-            onClick={() => jumpToIndex(session.currentIndex - 1)}
-            aria-label="Previous question"
-            className="h-10 px-3 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] disabled:opacity-40 inline-flex items-center gap-1 press-tactile"
-          >
-            <ChevronLeft className="h-4 w-4" />
-            Prev
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMobilePaletteOpen(true)}
-            data-testid="mobile-palette-trigger"
-            className="h-10 px-3 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] inline-flex items-center gap-1.5 press-tactile"
-          >
-            <LayoutGrid className="h-3.5 w-3.5 text-[#6E261A] dark:text-[#E0A92E]" />
-            <span>
-              {session.currentIndex + 1}/{liveQuestions.length}
-            </span>
-          </button>
-
-          {!isTimedMock && !currentEval ? (
-            <button
-              type="button"
-              onClick={() => handleCheckPracticeQuestion(currentQ)}
-              className="flex-1 h-10 px-3 rounded-full bg-[#6E261A] dark:bg-[#9E3E2E] text-white text-xs font-semibold press-tactile truncate"
-            >
-              Check
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => jumpToIndex(session.currentIndex + 1)}
-              disabled={session.currentIndex === liveQuestions.length - 1}
-              className="flex-1 h-10 px-3 rounded-full bg-[#6E261A] dark:bg-[#9E3E2E] text-white text-xs font-semibold disabled:opacity-40 press-tactile truncate"
-            >
-              Save &amp; Next
-            </button>
+        <div className="pointer-events-auto mx-auto max-w-lg rounded-[22px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF]/95 dark:bg-[#1C1714]/95 backdrop-blur-md px-2.5 py-2 shadow-[0_12px_32px_-8px_rgba(28,22,19,0.2)] dark:shadow-[0_14px_36px_-8px_rgba(0,0,0,0.68)] space-y-1.5">
+          {(footerState.isLastQuestion || footerState.isTimeUp) && (
+            <div className="flex items-center justify-between px-1.5 text-[10px] font-mono tabular-nums text-[#61554D] dark:text-[#D8CBB8]">
+              <span className="font-semibold text-[#6E261A] dark:text-[#E0A92E]">
+                {footerState.isTimeUp ? "Time's Up!" : 'Last Question'}
+              </span>
+              <span>
+                Answered {footerState.answeredCount}/{footerState.totalQuestions} · Unanswered{' '}
+                {footerState.unansweredCount}
+              </span>
+            </div>
           )}
 
-          <button
-            type="button"
-            disabled={session.currentIndex === liveQuestions.length - 1}
-            onClick={() => jumpToIndex(session.currentIndex + 1)}
-            aria-label="Next question"
-            className="h-10 px-3 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] disabled:opacity-40 inline-flex items-center gap-1 press-tactile"
-          >
-            Next
-            <ChevronRight className="h-4 w-4" />
-          </button>
+          <div className="flex items-center justify-between gap-1.5">
+            {/* Left group: Prev + Mark/Palette */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                disabled={footerState.isFirstQuestion}
+                onClick={() => jumpToIndex(session.currentIndex - 1)}
+                aria-label="Previous question"
+                className="h-10 px-2.5 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] disabled:opacity-40 inline-flex items-center gap-0.5 press-tactile"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                <span>Prev</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => toggleMarkForReview(currentQ.id, false)}
+                aria-label={isMarked ? 'Unmark for review' : 'Mark for review'}
+                aria-pressed={isMarked}
+                className={`h-10 w-9 rounded-full border inline-flex items-center justify-center press-tactile ${
+                  isMarked
+                    ? 'border-[#C89216] bg-[#FDF6E3] dark:bg-[#332714] text-[#8B6209] dark:text-[#E0A92E]'
+                    : 'border-[#E8E0D5] dark:border-[#352A24] bg-[#FAF8F4] dark:bg-[#241D19] text-[#61554D] dark:text-[#A99B8E]'
+                }`}
+              >
+                <Flag className="h-3.5 w-3.5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMobilePaletteOpen(true)}
+                data-testid="mobile-palette-trigger"
+                aria-label={`Open question palette (${session.currentIndex + 1} of ${liveQuestions.length})`}
+                className="h-10 px-2.5 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FAF8F4] dark:bg-[#241D19] text-[11px] font-mono font-bold tabular-nums text-[#1C1613] dark:text-[#F5F0E8] inline-flex items-center gap-1 press-tactile"
+              >
+                <LayoutGrid className="h-3.5 w-3.5 text-[#6E261A] dark:text-[#E0A92E]" />
+                <span>
+                  {session.currentIndex + 1}/{liveQuestions.length}
+                </span>
+              </button>
+            </div>
+
+            {/* Right group: Next + Submit Test (or upgraded Submit Test & View Score on last Q / Time's Up) */}
+            <div className="flex items-center gap-1.5 flex-1 justify-end min-w-0">
+              {footerState.isTimeUp ? (
+                <button
+                  type="button"
+                  onClick={handleFinishSession}
+                  data-testid="mobile-sticky-submit-btn"
+                  className="flex-1 h-10 px-3 rounded-full bg-[#C89216] dark:bg-[#E0A92E] text-[#1C1613] text-xs font-bold press-tactile whitespace-nowrap truncate"
+                >
+                  Time&apos;s Up — Submit ✓
+                </button>
+              ) : footerState.isLastQuestion ? (
+                <button
+                  type="button"
+                  onClick={handleRequestSubmit}
+                  data-testid="mobile-sticky-submit-btn"
+                  className="flex-1 h-10 px-3 rounded-full bg-[#C89216] hover:bg-[#B28012] dark:bg-[#E0A92E] text-[#1C1613] text-xs font-bold shadow-xs press-tactile whitespace-nowrap"
+                >
+                  Submit &amp; Score ✓
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => jumpToIndex(session.currentIndex + 1)}
+                    data-testid="mobile-sticky-next-btn"
+                    className="h-10 px-3.5 rounded-full bg-[#6E261A] dark:bg-[#9E3E2E] text-[#FAF8F4] text-xs font-semibold inline-flex items-center gap-0.5 press-tactile whitespace-nowrap shrink-0"
+                  >
+                    <span>Next</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleRequestSubmit}
+                    data-testid="mobile-sticky-submit-btn"
+                    className="h-10 px-3 rounded-full border border-[#6E261A] dark:border-[#E0A92E] bg-[#FFFFFF] dark:bg-[#1C1714] text-[#6E261A] dark:text-[#E0A92E] text-xs font-bold press-tactile whitespace-nowrap shrink-0"
+                  >
+                    Submit
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

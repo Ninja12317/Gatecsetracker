@@ -206,7 +206,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const tabs: Array<{ id: SettingsTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { id: 'exam', label: 'Exam & Countdown', icon: CalendarClock },
-    { id: 'display', label: 'Display & Scaling', icon: Monitor },
+    { id: 'display', label: 'Display & Navigation', icon: Monitor },
     { id: 'study', label: 'Study & Exam', icon: Sliders },
     { id: 'data', label: 'Data & Cache', icon: Database },
     { id: 'app', label: 'App & Offline', icon: Smartphone },
@@ -237,7 +237,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           )}
         </div>
 
-        <div className="flex flex-wrap gap-1.5 p-1.5 rounded-[22px] bg-[#EFE9DF] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520]">
+        <div
+          role="tablist"
+          aria-label="Settings sections"
+          className="flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar p-1.5 rounded-[22px] bg-[#EFE9DF] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520]"
+        >
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
@@ -245,8 +249,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2 px-3.5 rounded-[16px] text-xs font-semibold transition-all press-tactile ${
+                role="tab"
+                aria-selected={active}
+                data-testid={`settings-tab-${tab.id}`}
+                onClick={(e) => {
+                  setActiveTab(tab.id);
+                  e.currentTarget.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                }}
+                className={`shrink-0 whitespace-nowrap md:flex-1 flex items-center justify-center gap-2 py-2 px-3.5 rounded-[16px] text-xs font-semibold transition-all press-tactile ${
                   active
                     ? 'bg-white dark:bg-[#1C1714] text-[#6E261A] dark:text-[#E0A92E] shadow-xs'
                     : 'text-[#61554D] dark:text-[#A99B8E] hover:text-[#1C1613] dark:hover:text-[#F5F0E8]'
@@ -535,6 +545,50 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Mobile Navigation & Gestures */}
+          <div className="space-y-2.5 pt-4 border-t border-[#EFE9DF] dark:border-[#2E2520]">
+            <div>
+              <h2 className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8]">
+                Mobile Navigation &amp; Gestures
+              </h2>
+              <p className="text-xs text-[#61554D] dark:text-[#A99B8E]">
+                Fine-tune touch navigation on phones and narrow screens without affecting desktop layout.
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-4 rounded-[20px] bg-[#FAF8F4] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520] px-4 py-3.5">
+              <div>
+                <p className="text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8]">
+                  Enable Horizontal Swipe Between Tabs (Mobile)
+                </p>
+                <p className="text-[11px] text-[#61554D] dark:text-[#A99B8E] mt-0.5">
+                  Swipe left or right to switch primary tabs seamlessly. Automatically pauses on Sketchpad, CS Lab diagrams, tables, and active PYQ tests.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                data-testid="toggle-mobile-swipe-nav"
+                aria-checked={state.settings.enableMobileSwipeNav ?? true}
+                onClick={() => {
+                  const next = !(state.settings.enableMobileSwipeNav ?? true);
+                  onUpdateSettings({ enableMobileSwipeNav: next });
+                  showSaved(`Horizontal tab swipe ${next ? 'enabled' : 'disabled'}.`);
+                }}
+                className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors ${
+                  (state.settings.enableMobileSwipeNav ?? true)
+                    ? 'bg-[#6E261A] dark:bg-[#E0A92E]'
+                    : 'bg-[#D8CBB8] dark:bg-[#3A2E28]'
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transform transition-transform mt-0.5 ${
+                    (state.settings.enableMobileSwipeNav ?? true) ? 'translate-x-5' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
             </div>
           </div>
         </section>

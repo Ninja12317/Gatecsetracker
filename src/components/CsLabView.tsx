@@ -13,6 +13,8 @@ import {
   XCircle,
   Trophy,
   Info,
+  GitBranch,
+  CircuitBoard,
 } from 'lucide-react';
 import type { DryRunTraceTable } from '../types';
 import {
@@ -35,8 +37,10 @@ import {
 } from '../utils/csLabMath';
 import { CodeVisualizerPanel } from './CodeVisualizerPanel';
 import { DryRunTraceTablePanel } from './DryRunTraceTablePanel';
+import { TocStudioPanel } from './TocStudioPanel';
+import { DigitalLogicStudioPanel } from './DigitalLogicStudioPanel';
 
-type CsLabTab = 'toc' | 'coa' | 'ieee' | 'cn' | 'code_lab';
+type CsLabTab = 'toc' | 'toc_studio' | 'digital_logic' | 'coa' | 'ieee' | 'cn' | 'code_lab';
 
 interface CsLabViewProps {
   standaloneTraceTable?: DryRunTraceTable;
@@ -48,6 +52,8 @@ const STANDALONE_TRACE_ID = 'cs_lab_sandbox';
 
 const SUB_TABS: Array<{ id: CsLabTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'toc', label: 'TOC Matrix', icon: Grid3X3 },
+  { id: 'toc_studio', label: 'TOC Studio', icon: GitBranch },
+  { id: 'digital_logic', label: 'Digital Logic', icon: CircuitBoard },
   { id: 'coa', label: 'COA Cache & VM', icon: HardDrive },
   { id: 'ieee', label: 'IEEE-754 & 2s Comp', icon: Binary },
   { id: 'cn', label: 'CN CIDR & Frag', icon: Network },
@@ -248,11 +254,11 @@ export const CsLabView: React.FC<CsLabViewProps> = ({
           </div>
         </div>
 
-        {/* Sub-Tab Segmented Pills */}
+        {/* Sub-Tab Segmented Pills (Single-row horizontal rail on mobile) */}
         <div
           role="tablist"
           aria-label="CS Lab visualizers"
-          className="flex flex-wrap items-center gap-1.5 p-1.5 rounded-[22px] bg-[#EFE9DF] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520]"
+          className="flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar p-1.5 rounded-[22px] bg-[#EFE9DF] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520]"
         >
           {SUB_TABS.map((tab) => {
             const Icon = tab.icon;
@@ -264,14 +270,21 @@ export const CsLabView: React.FC<CsLabViewProps> = ({
                 role="tab"
                 aria-selected={active}
                 data-testid={`cslab-tab-${tab.id}`}
-                onClick={() => setActiveTab(tab.id)}
-                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold transition-colors press-tactile ${
+                onClick={(e) => {
+                  setActiveTab(tab.id);
+                  e.currentTarget.scrollIntoView({
+                    behavior: 'smooth',
+                    inline: 'center',
+                    block: 'nearest',
+                  });
+                }}
+                className={`shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold transition-colors press-tactile ${
                   active
                     ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-white shadow-xs'
                     : 'text-[#61554D] dark:text-[#D8CBB8] hover:bg-[#FFFFFF]/70 dark:hover:bg-[#1C1714]'
                 }`}
               >
-                <Icon className="h-3.5 w-3.5" />
+                <Icon className="h-3.5 w-3.5 shrink-0" />
                 {tab.label}
               </button>
             );
@@ -283,16 +296,16 @@ export const CsLabView: React.FC<CsLabViewProps> = ({
       {activeTab === 'toc' && (
         <section
           data-testid="cslab-panel-toc"
-          className="rounded-[24px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-5 sm:p-6 shadow-warm space-y-5"
+          className="rounded-[24px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-4 sm:p-6 shadow-warm space-y-5"
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             {/* Closure vs Decidability Toggle */}
-            <div className="inline-flex items-center p-1 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FAF8F4] dark:bg-[#241D19]">
+            <div className="flex flex-nowrap items-center overflow-x-auto no-scrollbar p-1 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FAF8F4] dark:bg-[#241D19] max-w-full">
               <button
                 type="button"
                 onClick={() => handleToggleTocSection('closure')}
                 data-testid="toc-section-closure"
-                className={`px-3.5 py-1.5 rounded-full text-xs font-semibold press-tactile ${
+                className={`shrink-0 whitespace-nowrap px-3.5 py-1.5 rounded-full text-xs font-semibold press-tactile ${
                   tocSection === 'closure'
                     ? 'bg-[#241914] text-[#FAF5EB] dark:bg-[#E0A92E] dark:text-[#1C1613]'
                     : 'text-[#61554D] dark:text-[#A99B8E]'
@@ -304,7 +317,7 @@ export const CsLabView: React.FC<CsLabViewProps> = ({
                 type="button"
                 onClick={() => handleToggleTocSection('decidability')}
                 data-testid="toc-section-decidability"
-                className={`px-3.5 py-1.5 rounded-full text-xs font-semibold press-tactile ${
+                className={`shrink-0 whitespace-nowrap px-3.5 py-1.5 rounded-full text-xs font-semibold press-tactile ${
                   tocSection === 'decidability'
                     ? 'bg-[#241914] text-[#FAF5EB] dark:bg-[#E0A92E] dark:text-[#1C1613]'
                     : 'text-[#61554D] dark:text-[#A99B8E]'
@@ -1323,6 +1336,12 @@ export const CsLabView: React.FC<CsLabViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* ===================== TAB 6: TOC DESIGN STUDIO ===================== */}
+      {activeTab === 'toc_studio' && <TocStudioPanel />}
+
+      {/* ===================== TAB 7: DIGITAL LOGIC DESIGN STUDIO ===================== */}
+      {activeTab === 'digital_logic' && <DigitalLogicStudioPanel />}
     </div>
   );
 };

@@ -92,6 +92,16 @@ interface PyqStudioViewProps {
   zenMode: boolean;
   onToggleZenMode: () => void;
   onRequestPdfExport: (req: PdfExportRequest) => void;
+  onSessionStateChange?: (info: {
+    active: boolean;
+    isTimed: boolean;
+    finished: boolean;
+    title: string;
+    sketchpadOpen: boolean;
+    studioTab: 'practice' | 'mistakes' | 'resources';
+  }) => void;
+  exitSessionTrigger?: number;
+  resetStudioTabTrigger?: number;
 }
 
 type StudioTab = 'practice' | 'mistakes' | 'resources';
@@ -138,10 +148,38 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
   zenMode,
   onToggleZenMode,
   onRequestPdfExport,
+  onSessionStateChange,
+  exitSessionTrigger = 0,
+  resetStudioTabTrigger = 0,
 }) => {
   const [studioTab, setStudioTab] = useState<StudioTab>('practice');
   const [session, setSession] = useState<ActiveCbtSession | null>(null);
   const [sketchpadOpen, setSketchpadOpen] = useState<boolean>(false);
+
+  // Notify parent App about active PYQ test session / sketchpad / sub-tab for Mobile Bottom Nav & Contextual Back
+  useEffect(() => {
+    onSessionStateChange?.({
+      active: Boolean(session && studioTab === 'practice'),
+      isTimed: Boolean(session && session.mode === 'cbt_mock' && !session.finished),
+      finished: Boolean(session?.finished),
+      title: session?.title ?? '',
+      sketchpadOpen,
+      studioTab,
+    });
+  }, [session, studioTab, sketchpadOpen, onSessionStateChange]);
+
+  useEffect(() => {
+    if (exitSessionTrigger > 0) {
+      setSession(null);
+      setSketchpadOpen(false);
+    }
+  }, [exitSessionTrigger]);
+
+  useEffect(() => {
+    if (resetStudioTabTrigger > 0) {
+      setStudioTab('practice');
+    }
+  }, [resetStudioTabTrigger]);
 
   // Per-subject Free-Tier PYQ Fetcher state
   const [fetchSubjectId, setFetchSubjectId] = useState<SubjectId>('os');
@@ -388,45 +426,54 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
   // ===================== STUDIO LOBBY / MISTAKE BUCKET / OPEN RESOURCES =====================
   return (
     <div className="space-y-6">
-      {/* Studio Sub-Navigation Pill Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] px-5 py-3.5 shadow-warm">
-        <div
-          className="flex flex-wrap items-center gap-1.5"
-          role="tablist"
-          aria-label="PYQ Studio tabs"
-        >
-          {[
-            {
-              id: 'practice' as const,
-              label: `PYQ Test Builder (${allQuestions.length.toLocaleString()} Qs)`,
-            },
-            {
-              id: 'mistakes' as const,
-              label: `Mistake Bucket (${unresolvedMistakes.length} Open)`,
-            },
-            {
-              id: 'resources' as const,
-              label: 'Importers & Open Resources',
-            },
-          ].map((tab) => {
-            const active = studioTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => setStudioTab(tab.id)}
-                className={`px-4 py-1.5 rounded-full text-xs font-semibold press-tactile whitespace-nowrap ${
-                  active
-                    ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-[#FAF8F4]'
-                    : 'text-[#61554D] dark:text-[#A99B8E] hover:bg-[#FAF8F4] dark:hover:bg-[#241D19]'
-                }`}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
+      {/* Studio Sub-Navigation Pill Bar (Single-row horizontal rail on mobile, zero vertical stacking) */}
+      <div className="flex flex-nowrap items-center justify-between gap-2 rounded-[24px] sm:rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] px-3 sm:px-5 py-2.5 sm:py-3.5 shadow-warm">
+        <div className="min-w-0 flex-1 mobile-rail-fade">
+          <div
+            className="flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 -mx-1"
+            role="tablist"
+            aria-label="PYQ Studio tabs"
+          >
+            {[
+              {
+                id: 'practice' as const,
+                label: `Test Builder (${allQuestions.length.toLocaleString()})`,
+              },
+              {
+                id: 'mistakes' as const,
+                label: `Mistakes (${unresolvedMistakes.length})`,
+              },
+              {
+                id: 'resources' as const,
+                label: 'Importers & Resources',
+              },
+            ].map((tab) => {
+              const active = studioTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={(e) => {
+                    setStudioTab(tab.id);
+                    e.currentTarget.scrollIntoView({
+                      behavior: 'smooth',
+                      inline: 'center',
+                      block: 'nearest',
+                    });
+                  }}
+                  className={`shrink-0 whitespace-nowrap px-3.5 sm:px-4 py-1.5 rounded-full text-xs font-semibold press-tactile ${
+                    active
+                      ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-[#FAF8F4]'
+                      : 'text-[#61554D] dark:text-[#A99B8E] hover:bg-[#FAF8F4] dark:hover:bg-[#241D19]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <button
@@ -436,10 +483,13 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
             setImportSuccessMsg('');
             setImportModalOpen(true);
           }}
-          className="inline-flex items-center gap-1.5 h-9 px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] hover:bg-[#EFE9DF] dark:hover:bg-[#312722] press-tactile whitespace-nowrap"
+          aria-label="Bulk Import JSON"
+          title="Bulk Import JSON"
+          className="inline-flex items-center gap-1.5 h-9 px-3 sm:px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] hover:bg-[#EFE9DF] dark:hover:bg-[#312722] press-tactile whitespace-nowrap shrink-0"
         >
           <Upload className="h-3.5 w-3.5 text-[#6E261A] dark:text-[#E0A92E]" />
-          Bulk Import JSON
+          <span className="hidden sm:inline">Bulk Import JSON</span>
+          <span className="sm:hidden">Import</span>
         </button>
       </div>
 
@@ -464,12 +514,12 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
       {/* TAB 2: MISTAKE BUCKET */}
       {studioTab === 'mistakes' && (
         <section className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-4 shadow-warm">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-[24px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-3.5 sm:p-4 shadow-warm">
+            <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 px-1 -mx-1">
               <button
                 type="button"
                 onClick={() => setMistakeFilter('unresolved')}
-                className={`px-4 py-1.5 rounded-full text-xs font-semibold press-tactile ${
+                className={`shrink-0 whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-semibold press-tactile ${
                   mistakeFilter === 'unresolved'
                     ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-white'
                     : 'border border-[#E8E0D5] dark:border-[#2E2520] text-[#61554D] dark:text-[#A99B8E]'
@@ -480,7 +530,7 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
               <button
                 type="button"
                 onClick={() => setMistakeFilter('all')}
-                className={`px-4 py-1.5 rounded-full text-xs font-semibold press-tactile ${
+                className={`shrink-0 whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-semibold press-tactile ${
                   mistakeFilter === 'all'
                     ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-white'
                     : 'border border-[#E8E0D5] dark:border-[#2E2520] text-[#61554D] dark:text-[#A99B8E]'

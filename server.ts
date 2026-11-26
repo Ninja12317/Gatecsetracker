@@ -1431,6 +1431,117 @@ ${numberedCode}`;
     });
   });
 
+  // --- TOC Studio: Custom Formal Language Classifier (Free-Tier Gemini 2.5 Flash + In-Memory Cache) ---
+  interface ClassifiedLanguageResult {
+    expression: string;
+    chomskyClass: string;
+    isDcfl: boolean;
+    complementClass: string;
+    myhillNerode: string;
+    pumpingSketch: string;
+    automatonOrGrammarHint: string;
+    gateTrap: string;
+  }
+  const languageClassifyCache = new Map<string, ClassifiedLanguageResult>();
+
+  app.post('/api/classify-language', async (req, res) => {
+    const rawExpr = typeof req.body?.expression === 'string' ? req.body.expression.trim() : '';
+    if (rawExpr.length < 3 || rawExpr.length > 300) {
+      res.status(400).json({
+        ok: false,
+        error: 'Enter a formal language definition between 3 and 300 characters.',
+      });
+      return;
+    }
+
+    const cacheKey = rawExpr.toLowerCase().replace(/\s+/g, ' ');
+    const cached = languageClassifyCache.get(cacheKey);
+    if (cached) {
+      res.json({ ok: true, cached: true, result: cached });
+      return;
+    }
+
+    const ai = getGenAiClient();
+    if (!ai) {
+      res.status(200).json({
+        ok: false,
+        error: 'Free-Tier AI key not configured · Explore the 28 curated GATE languages below offline (₹0).',
+      });
+      return;
+    }
+
+    const prompt = `You are an IIT Madras GATE CSE Theory of Computation (TOC) professor.
+Classify the following formal language accurately within the Chomsky Hierarchy and GATE CSE syllabus.
+Return ONLY valid JSON (no markdown fences, no extra prose) with this exact schema:
+{
+  "chomskyClass": "One of: Regular | DCFL | CFL (Non-DCFL) | CSL | Recursive | RE (Non-Recursive) | Not RE",
+  "isDcfl": true or false,
+  "complementClass": "Exact class of complement L-bar and brief reason (<= 110 chars)",
+  "myhillNerode": "Finite index value or Infinite equivalence classes explanation (<= 160 chars)",
+  "pumpingSketch": "Concise Pumping Lemma or closure-property proof sketch (<= 220 chars)",
+  "automatonOrGrammarHint": "Minimal DFA / DPDA / NPDA / LBA / TM or CFG construction idea (<= 180 chars)",
+  "gateTrap": "Most common GATE exam trap or edge case for this language (<= 160 chars)"
+}
+
+LANGUAGE:
+${rawExpr}`;
+
+    const modelsToTry = [VERIFY_PRIMARY_MODEL, VERIFY_FALLBACK_MODEL];
+    let sawQuotaError = false;
+
+    for (const modelName of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: prompt,
+          config: {
+            temperature: 0.1,
+            responseMimeType: 'application/json',
+          },
+        });
+
+        const parsed = extractJsonFromModelText(response.text ?? '') as Record<string, unknown> | null;
+        if (!parsed || typeof parsed.chomskyClass !== 'string') {
+          continue;
+        }
+
+        const result: ClassifiedLanguageResult = {
+          expression: rawExpr,
+          chomskyClass: String(parsed.chomskyClass).slice(0, 40),
+          isDcfl: Boolean(parsed.isDcfl),
+          complementClass: String(parsed.complementClass ?? 'Depends on closure of this class.').slice(0, 180),
+          myhillNerode: String(parsed.myhillNerode ?? 'See equivalence class behavior.').slice(0, 220),
+          pumpingSketch: String(parsed.pumpingSketch ?? 'Apply Regular or CFL Pumping Lemma.').slice(0, 280),
+          automatonOrGrammarHint: String(parsed.automatonOrGrammarHint ?? 'Construct minimal recognizer.').slice(0, 220),
+          gateTrap: String(parsed.gateTrap ?? 'Verify alphabet size and exponent bounds carefully.').slice(0, 220),
+        };
+
+        if (languageClassifyCache.size >= 200) {
+          const oldestKey = languageClassifyCache.keys().next().value;
+          if (oldestKey) languageClassifyCache.delete(oldestKey);
+        }
+        languageClassifyCache.set(cacheKey, result);
+
+        res.json({ ok: true, cached: false, modelUsed: modelName, result });
+        return;
+      } catch (err) {
+        if (isQuotaExceededError(err)) {
+          sawQuotaError = true;
+          continue;
+        }
+        console.error(`[classify-language] ${modelName} error:`, err);
+      }
+    }
+
+    res.status(200).json({
+      ok: false,
+      quotaExceeded: sawQuotaError,
+      error: sawQuotaError
+        ? 'Daily free AI limit reached · All 28 curated GATE languages below work 100% offline.'
+        : 'AI classifier temporarily unavailable · Use the 28 curated GATE languages below.',
+    });
+  });
+
   // Ensure PWA manifest & Service Worker always serve with exact headers in both dev & production
   const pwaStaticMiddleware = (staticRoot: string) =>
     express.static(staticRoot, {

@@ -49,7 +49,7 @@ export const FloatingFocusMiniPill: React.FC<FloatingFocusMiniPillProps> = React
         data-testid="floating-focus-pill"
         role="region"
         aria-label="Active Focus Timer"
-        className="no-print fixed bottom-5 right-5 z-40 flex items-center gap-1.5 rounded-full bg-[#241914] dark:bg-[#171311] text-[#FAF8F4] pl-3.5 pr-1.5 py-1.5 border border-[#C89216]/45 shadow-warm-lg"
+        className="no-print fixed bottom-[86px] md:bottom-6 right-4 md:right-5 z-40 flex items-center gap-1.5 rounded-full bg-[#241914] dark:bg-[#171311] text-[#FAF8F4] pl-3.5 pr-1.5 py-1.5 border border-[#C89216]/45 shadow-warm-lg"
       >
         <button
           type="button"

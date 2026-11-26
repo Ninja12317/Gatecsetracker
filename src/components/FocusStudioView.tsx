@@ -190,16 +190,16 @@ export const FocusStudioView: React.FC<FocusStudioViewProps> = ({
   return (
     <div className="space-y-8" data-testid="focus-studio-view">
       {/* Compact Editorial Page Header */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FDF6E3] dark:bg-[#2C2215] border border-[#EED89A] dark:border-[#5C441B] text-[11px] font-semibold text-[#8B6209] dark:text-[#E0A92E]">
+      <div className="flex items-start sm:items-end justify-between gap-3">
+        <div className="min-w-0">
+          <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FDF6E3] dark:bg-[#2C2215] border border-[#EED89A] dark:border-[#5C441B] text-[11px] font-semibold text-[#8B6209] dark:text-[#E0A92E]">
             <Sparkles className="h-3 w-3" />
             Deep-Work Sanctuary · Persistent Cross-Tab Timer
           </span>
-          <h1 className="mt-2 font-display text-2xl sm:text-[30px] font-bold tracking-[-0.03em] text-[#1C1613] dark:text-[#F5F0E8]">
-            Focus Studio &amp; Execution Cadence
+          <h1 className="sm:mt-2 font-display text-xl sm:text-[30px] font-bold tracking-[-0.03em] text-[#1C1613] dark:text-[#F5F0E8] truncate">
+            Focus Studio
           </h1>
-          <p className="mt-1 text-sm text-[#61554D] dark:text-[#A99B8E] max-w-2xl">
+          <p className="mt-0.5 sm:mt-1 text-xs sm:text-sm text-[#61554D] dark:text-[#A99B8E] max-w-2xl">
             Lock a single GATE CSE target, isolate distractions, and log every deep-work block straight to your 70-day consistency radar.
           </p>
         </div>
@@ -208,11 +208,12 @@ export const FocusStudioView: React.FC<FocusStudioViewProps> = ({
           type="button"
           onClick={toggleZenFullscreen}
           data-testid="focus-zen-toggle-btn"
-          className="inline-flex items-center gap-2 h-10 px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] hover:border-[#C89216] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] shadow-xs press-tactile"
+          className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 sm:gap-2 h-9 sm:h-10 px-3 sm:px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] hover:border-[#C89216] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] shadow-xs press-tactile"
         >
           <Maximize2 className="h-3.5 w-3.5 text-[#6E261A] dark:text-[#E0A92E]" />
-          Zen Fullscreen
-          <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-full bg-[#F4EFE6] dark:bg-[#261E1A] text-[#61554D] dark:text-[#A99B8E]">
+          <span className="hidden sm:inline">Zen Fullscreen</span>
+          <span className="sm:hidden">Zen</span>
+          <kbd className="hidden sm:inline font-mono text-[10px] px-1.5 py-0.5 rounded-full bg-[#F4EFE6] dark:bg-[#261E1A] text-[#61554D] dark:text-[#A99B8E]">
             Z
           </kbd>
         </button>
@@ -221,12 +222,12 @@ export const FocusStudioView: React.FC<FocusStudioViewProps> = ({
       {/* PRIMARY 2-COLUMN BENTO WORKSPACE */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* LEFT COLUMN (7 cols): Matte Roasted Cocoa Deep-Work Timer Card */}
-        <div className="lg:col-span-7 rounded-[28px] squircle bg-[#241914] dark:bg-[#171311] text-[#FAF8F4] border border-[#3B2B23] dark:border-[#2E2520] p-5 sm:p-6 shadow-warm-lg space-y-6">
-          {/* Sculpted 7-Mode Pill Selector */}
+        <div className="lg:col-span-7 rounded-[28px] squircle bg-[#241914] dark:bg-[#171311] text-[#FAF8F4] border border-[#3B2B23] dark:border-[#2E2520] p-4 sm:p-6 shadow-warm-lg space-y-6">
+          {/* Sculpted 7-Mode Pill Selector (Single-row horizontal rail on mobile) */}
           <div
             role="tablist"
             aria-label="Focus timer duration presets"
-            className="flex flex-wrap items-center justify-center gap-1.5 p-1.5 rounded-[22px] sm:rounded-full bg-[#19110E] dark:bg-[#110D0B] border border-white/10"
+            className="flex flex-nowrap md:justify-center items-center gap-1.5 overflow-x-auto no-scrollbar p-1.5 rounded-full bg-[#19110E] dark:bg-[#110D0B] border border-white/10"
           >
             {presets.map((preset) => {
               const selected = preset.id === presetId;
@@ -236,9 +237,16 @@ export const FocusStudioView: React.FC<FocusStudioViewProps> = ({
                   type="button"
                   role="tab"
                   aria-selected={selected}
-                  onClick={() => selectPreset(preset.id)}
+                  onClick={(e) => {
+                    selectPreset(preset.id);
+                    e.currentTarget.scrollIntoView({
+                      behavior: 'smooth',
+                      inline: 'center',
+                      block: 'nearest',
+                    });
+                  }}
                   title={preset.title}
-                  className={`px-3 py-1.5 rounded-full text-xs font-mono font-semibold transition-colors press-tactile ${
+                  className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-mono font-semibold transition-colors press-tactile ${
                     selected
                       ? 'bg-[#C89216] text-[#1C1613] shadow-xs'
                       : 'text-[#C7B6A5] hover:text-[#FAF8F4] hover:bg-white/5'

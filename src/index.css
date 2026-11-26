@@ -454,6 +454,34 @@ html, body {
   will-change: transform;
 }
 
+/* Clean hidden-scrollbar horizontal pill rails (mobile & floating bottom nav) */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Subtle right-edge scroll hint fade on mobile horizontal pill rails */
+.mobile-rail-fade {
+  position: relative;
+}
+
+@media (max-width: 767px) {
+  .mobile-rail-fade::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    top: 0;
+    right: -4px;
+    bottom: 0;
+    width: 24px;
+    background: linear-gradient(90deg, transparent, var(--surface-card));
+  }
+}
+
 /* ==================== VECTOR PRINT-TO-PDF ENGINE ==================== */
 .print-only {
   display: none;

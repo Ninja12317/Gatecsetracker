@@ -285,24 +285,26 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-nowrap md:flex-wrap items-center gap-2 overflow-x-auto no-scrollbar py-0.5 px-1 -mx-1 md:mx-0 md:px-0 w-full md:w-auto">
           <button
             type="button"
             onClick={() => void onResyncGateR()}
             disabled={gaterSyncStatus === 'syncing'}
-            className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] hover:border-[#C89216] dark:hover:border-[#E0A92E] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] disabled:opacity-50 press-tactile"
+            className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 h-8 px-3 sm:px-3.5 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] hover:border-[#C89216] dark:hover:border-[#E0A92E] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] disabled:opacity-50 press-tactile"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${gaterSyncStatus === 'syncing' ? 'animate-spin' : ''}`} />
-            Re-Sync from GitHub
+            <span className="sm:hidden">Re-Sync</span>
+            <span className="hidden sm:inline">Re-Sync from GitHub</span>
           </button>
 
           <button
             type="button"
             onClick={onStartDailyDpp}
-            className="inline-flex items-center gap-1.5 h-8 px-4 rounded-full bg-[#241914] hover:bg-[#32241D] dark:bg-[#E0A92E] dark:text-[#1C1613] text-[#FAF5EB] text-xs font-semibold press-tactile"
+            className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 h-8 px-3.5 sm:px-4 rounded-full bg-[#241914] hover:bg-[#32241D] dark:bg-[#E0A92E] dark:text-[#1C1613] text-[#FAF5EB] text-xs font-semibold press-tactile"
           >
             <Zap className="h-3.5 w-3.5 text-[#E0A92E] dark:text-[#1C1613]" />
-            Daily Mixed DPP (10 Qs)
+            <span className="sm:hidden">Daily DPP (10 Qs)</span>
+            <span className="hidden sm:inline">Daily Mixed DPP (10 Qs)</span>
           </button>
         </div>
       </div>
@@ -336,14 +338,14 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
             </h2>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-nowrap sm:flex-wrap items-center gap-2 overflow-x-auto no-scrollbar py-0.5 px-1 -mx-1 sm:mx-0 sm:px-0 w-full sm:w-auto">
             {/* Hide Removed 2027 Topics Toggle */}
             <button
               type="button"
               role="switch"
               aria-checked={hideRemoved2027}
               onClick={() => setHideRemoved2027((v) => !v)}
-              className={`inline-flex items-center gap-2 h-8 px-3.5 rounded-full border text-xs font-semibold press-tactile ${
+              className={`shrink-0 whitespace-nowrap inline-flex items-center gap-2 h-8 px-3.5 rounded-full border text-xs font-semibold press-tactile ${
                 hideRemoved2027
                   ? 'border-[#6E261A] dark:border-[#E0A92E] bg-[#F8EAE6] dark:bg-[#331A16] text-[#6E261A] dark:text-[#E0A92E]'
                   : 'border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-[#61554D] dark:text-[#A99B8E]'
@@ -359,7 +361,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
             <button
               type="button"
               onClick={resetFilters}
-              className="h-8 px-3 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] text-xs font-medium text-[#61554D] dark:text-[#A99B8E] hover:text-[#1C1613] dark:hover:text-[#F5F0E8] press-tactile"
+              className="shrink-0 whitespace-nowrap h-8 px-3 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] text-xs font-medium text-[#61554D] dark:text-[#A99B8E] hover:text-[#1C1613] dark:hover:text-[#F5F0E8] press-tactile"
             >
               Reset All
             </button>
@@ -385,7 +387,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
               </button>
             )}
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-nowrap md:flex-wrap items-center gap-1.5 md:gap-2 overflow-x-auto no-scrollbar py-1 px-1 -mx-1 md:mx-0 md:px-0">
             {GATE_2027_SYLLABUS.map((subj) => {
               const active = selectedSubjects.includes(subj.id);
               const count = subjectCounts[subj.id] ?? 0;
@@ -405,9 +407,12 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
                 <button
                   key={subj.id}
                   type="button"
-                  onClick={() => toggleSubject(subj.id)}
+                  onClick={(e) => {
+                    toggleSubject(subj.id);
+                    e.currentTarget.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                  }}
                   aria-pressed={active}
-                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border text-xs font-semibold press-tactile ${
+                  className={`shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border text-xs font-semibold press-tactile ${
                     active
                       ? 'border-[#6E261A] bg-[#6E261A] dark:border-[#E0A92E] dark:bg-[#9E3E2E] text-white'
                       : 'border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-[#1C1613] dark:text-[#F5F0E8] hover:border-[#C89216] dark:hover:border-[#E0A92E]'
@@ -512,16 +517,17 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
               <span className="block text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8]">
                 3. Paper Year Range
               </span>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-nowrap md:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 -mx-1 md:mx-0 md:px-0">
                 {YEAR_PRESETS.map((preset) => (
                   <button
                     key={preset.id}
                     type="button"
-                    onClick={() => {
+                    onClick={(e) => {
                       setYearRange(preset.id);
                       if (preset.id !== 'specific') setSpecificYear(null);
+                      e.currentTarget.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
                     }}
-                    className={`px-3 py-1.5 rounded-full border text-xs font-semibold press-tactile ${
+                    className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-full border text-xs font-semibold press-tactile ${
                       yearRange === preset.id
                         ? 'border-[#6E261A] bg-[#6E261A] dark:border-[#E0A92E] dark:bg-[#9E3E2E] text-white'
                         : 'border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-[#61554D] dark:text-[#D8CBB8]'
@@ -582,13 +588,13 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
             <span className="block text-[11px] font-semibold uppercase tracking-wide text-[#61554D] dark:text-[#A99B8E]">
               Marks
             </span>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-nowrap md:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 px-1 -mx-1 md:mx-0 md:px-0">
               {(['all', 1, 2] as const).map((m) => (
                 <button
                   key={String(m)}
                   type="button"
                   onClick={() => setMarksFilter(m)}
-                  className={`px-3 py-1 rounded-full border text-xs font-mono font-semibold press-tactile ${
+                  className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-full border text-xs font-mono font-semibold press-tactile ${
                     marksFilter === m
                       ? 'border-[#6E261A] bg-[#6E261A] dark:border-[#E0A92E] dark:bg-[#9E3E2E] text-white'
                       : 'border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-[#61554D] dark:text-[#D8CBB8]'
@@ -604,13 +610,13 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
             <span className="block text-[11px] font-semibold uppercase tracking-wide text-[#61554D] dark:text-[#A99B8E]">
               Question Type
             </span>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-nowrap md:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 px-1 -mx-1 md:mx-0 md:px-0">
               {(['all', 'MCQ', 'MSQ', 'NAT'] as const).map((fmt) => (
                 <button
                   key={fmt}
                   type="button"
                   onClick={() => setFormatFilter(fmt)}
-                  className={`px-3 py-1 rounded-full border text-xs font-mono font-semibold press-tactile ${
+                  className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-full border text-xs font-mono font-semibold press-tactile ${
                     formatFilter === fmt
                       ? 'border-[#6E261A] bg-[#6E261A] dark:border-[#E0A92E] dark:bg-[#9E3E2E] text-white'
                       : 'border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-[#61554D] dark:text-[#D8CBB8]'
@@ -626,13 +632,16 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
             <span className="block text-[11px] font-semibold uppercase tracking-wide text-[#61554D] dark:text-[#A99B8E]">
               Attempt Status
             </span>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-nowrap md:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 px-1 -mx-1 md:mx-0 md:px-0">
               {STATUS_OPTIONS.map((st) => (
                 <button
                   key={st.id}
                   type="button"
-                  onClick={() => setStatusFilter(st.id)}
-                  className={`px-3 py-1 rounded-full border text-xs font-semibold press-tactile ${
+                  onClick={(e) => {
+                    setStatusFilter(st.id);
+                    e.currentTarget.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                  }}
+                  className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-full border text-xs font-semibold press-tactile ${
                     statusFilter === st.id
                       ? 'border-[#6E261A] bg-[#6E261A] dark:border-[#E0A92E] dark:bg-[#9E3E2E] text-white'
                       : 'border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-[#61554D] dark:text-[#D8CBB8]'
