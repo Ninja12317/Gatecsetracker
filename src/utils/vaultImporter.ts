@@ -8,8 +8,8 @@ import type {
   VaultKind,
   VaultPack,
   VaultSource,
-} from '../types';
-import { SUBJECT_MAP } from '../data/syllabus';
+} from '../types/index.ts';
+import { SUBJECT_MAP } from '../data/syllabus.ts';
 
 export const VALID_VAULT_SUBJECTS: GateSubject[] = [
   'ga',
