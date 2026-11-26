@@ -13,6 +13,10 @@ import {
   sanitizeFetchedTip,
   VALID_SUBJECT_IDS,
 } from './src/utils/pyqServerHelpers.ts';
+import {
+  parseAndCategorizeBulkJson,
+  resolveGithubVaultCandidateUrls,
+} from './src/utils/vaultImporter.ts';
 import type { Question, SubjectId, TipItem } from './src/types/index.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -264,6 +268,67 @@ async function startServer() {
     res.status(200).json({
       ok: false,
       message: `Could not sync GateR dataset right now (${lastError}). Serving local cached bank.`,
+    });
+  });
+
+  /**
+   * POST /api/sync-vault-github
+   * Zero-AI-cost CORS-free GitHub bundle fetcher for Traps, Tricks & Formula Vault.
+   * Strictly SSRF-allowlisted to github.com and raw.githubusercontent.com HTTPS URLs.
+   */
+  app.post('/api/sync-vault-github', async (req, res) => {
+    const rawUrl = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    const customPackName =
+      typeof req.body?.packName === 'string' ? req.body.packName.trim().slice(0, 100) : '';
+
+    const resolved = resolveGithubVaultCandidateUrls(rawUrl);
+    if (!resolved.ok || resolved.urls.length === 0) {
+      res.status(400).json({
+        ok: false,
+        message: resolved.error || 'Invalid GitHub URL.',
+      });
+      return;
+    }
+
+    let lastError = 'No vault JSON bundle found at that GitHub location.';
+    for (const candidateUrl of resolved.urls) {
+      try {
+        const resp = await fetchWithTimeout(candidateUrl, 12_000);
+        if (!resp.ok) {
+          lastError = `HTTP ${resp.status} at ${candidateUrl}`;
+          continue;
+        }
+        const rawText = await resp.text();
+        if (rawText.length < 10 || rawText.length > 2_500_000) {
+          lastError = 'File size out of allowed bounds (max 2.5 MB).';
+          continue;
+        }
+        const parsed = parseAndCategorizeBulkJson(rawText, {
+          packName: customPackName || `GitHub: ${resolved.displayLabel}`,
+          source: 'GitHub Sync',
+          sourceUrl: candidateUrl,
+          maxCards: 500,
+        });
+        if (!parsed.ok || !parsed.pack) {
+          lastError = parsed.error || 'File did not contain valid vault cards.';
+          continue;
+        }
+        res.json({
+          ok: true,
+          resolvedUrl: candidateUrl,
+          pack: parsed.pack,
+          stats: parsed.stats,
+          message: `Synced ${parsed.pack.cardCount} card(s) from ${resolved.displayLabel} (₹0 cost).`,
+        });
+        return;
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : 'GitHub fetch failed.';
+      }
+    }
+
+    res.status(200).json({
+      ok: false,
+      message: `Could not sync GitHub bundle (${lastError}). Tip: link directly to a raw .json file or add gate27-vault.json / vault.json to your repo root.`,
     });
   });
 

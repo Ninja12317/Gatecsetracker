@@ -408,6 +408,27 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidVaultPack(data, userId, packId) {
+      return data.keys().hasAll([
+          'ownerId', 'packId', 'name', 'source', 'cardCount', 'cards', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'packId', 'name', 'source', 'sourceUrl', 'cardCount', 'cards', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && data.packId == packId
+        && isValidId(data.packId)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.source in ['GitHub Sync', 'JSON Import', 'Custom']
+        && (!('sourceUrl' in data) || (data.sourceUrl is string && data.sourceUrl.size() <= 400))
+        && data.cardCount is number && data.cardCount >= 1 && data.cardCount <= 150
+        && data.cards is list && data.cards.size() >= 1 && data.cards.size() <= 150
+        && data.cards[0] is map
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // ==================== COLLECTION MATCH RULES ====================
 
     match /users/{userId} {
@@ -728,6 +749,31 @@ service cloud.firestore {
             'presetName', 'columns', 'rows', 'updatedAt'
           ]);
         allow delete: if isVerified() && isOwner(userId) && isValidId(questionId);
+      }
+
+      match /vault_packs/{packId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(packId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(packId)
+          && isValidVaultPack(incoming(), userId, packId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(packId)
+          && isValidVaultPack(incoming(), userId, packId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().packId == existing().packId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'cardCount', 'cards', 'updatedAt'
+          ]);
+        allow delete: if isVerified() && isOwner(userId) && isValidId(packId);
       }
     }
   }

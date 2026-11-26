@@ -37,6 +37,8 @@ import type {
   TipItem,
   TopicStatus,
   TrapSourceType,
+  VaultCard,
+  VaultPack,
   VerifiedAnswerRecord,
   WarRoomState,
 } from '../types';
@@ -50,7 +52,7 @@ import {
 } from '../firebase';
 import { createInitialWarRoomState } from '../data/seedState';
 import { GATE_QUESTION_BANK } from '../data/questions';
-import { GATE_TIPS } from '../data/tips';
+import { GATE_2027_MASTER_VAULT } from '../data/gate27FormulaTrapBundle';
 import { GATE_2027_SYLLABUS } from '../data/syllabus';
 import { nextTopicStatus, toLocalIsoDate } from '../utils/gateMath';
 import {
@@ -67,6 +69,13 @@ import {
   computeNextSrsSchedule,
   makeSrsCardId,
 } from '../utils/examPolish';
+import {
+  cardFingerprint,
+  mineMistakesToVaultCards,
+  splitPackForFirestore,
+  tipItemToVaultCard,
+  vaultCardToTipItem,
+} from '../utils/vaultImporter';
 
 const STORAGE_KEY = 'gate27_war_room_state_v2';
 const SUBJECT_COOLDOWN_MS = 45_000;
@@ -107,6 +116,7 @@ function loadLocalState(): WarRoomState {
       bookmarkedTips: parsed.bookmarkedTips ?? [],
       customTips: parsed.customTips ?? [],
       trapsVault: parsed.trapsVault ?? [],
+      vaultPacks: Array.isArray(parsed.vaultPacks) ? parsed.vaultPacks : [],
       srsCards: parsed.srsCards ?? {},
       mocks: parsed.mocks ?? [],
       studyLogs: parsed.studyLogs ?? [],
@@ -160,7 +170,6 @@ export function useWarRoomStore() {
   const [trapsGenerating, setTrapsGenerating] = useState<boolean>(false);
   const [trapsCooldownUntil, setTrapsCooldownUntil] = useState<number>(0);
   const [trapsNotice, setTrapsNotice] = useState<string>('');
-  const dailyTrapsAutoAttemptedRef = useRef<string>('');
 
   // GateR full repository IndexedDB-cached PYQ bank
   const [gaterQuestions, setGaterQuestions] = useState<Question[]>([]);
@@ -424,6 +433,62 @@ export function useWarRoomStore() {
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  }, []);
+
+  const persistVaultPack = useCallback(async (uid: string, pack: VaultPack, isUpdate = false) => {
+    const docId = sanitizeDocId(pack.packId);
+    const path = `users/${uid}/vault_packs/${docId}`;
+    const boundedCards = pack.cards.slice(0, 150).map((c) => {
+      const cleanCard: Record<string, unknown> = {
+        id: sanitizeDocId(c.id),
+        subject: c.subject,
+        subtopic: (c.subtopic || 'Core Concepts').slice(0, 120),
+        tagMatchKeywords: (c.tagMatchKeywords ?? []).slice(0, 8),
+        kind: c.kind,
+        highYield: Boolean(c.highYield),
+        title: c.title.slice(0, 180),
+        gateTruth: c.gateTruth.slice(0, 2400),
+        source: c.source,
+        packId: docId,
+        packName: pack.name.slice(0, 120),
+      };
+      if (c.formulaLatex) cleanCard.formulaLatex = c.formulaLatex.slice(0, 500);
+      if (c.codeSnippet) cleanCard.codeSnippet = c.codeSnippet.slice(0, 2000);
+      if (c.commonTrap) cleanCard.commonTrap = c.commonTrap.slice(0, 800);
+      if (c.quickExample) cleanCard.quickExample = c.quickExample.slice(0, 600);
+      if (c.outOf2027Syllabus) cleanCard.outOf2027Syllabus = true;
+      if (typeof c.createdAt === 'number') cleanCard.createdAt = c.createdAt;
+      return cleanCard;
+    });
+    if (boundedCards.length === 0) return;
+
+    try {
+      if (isUpdate) {
+        await updateDoc(doc(db, 'users', uid, 'vault_packs', docId), {
+          name: pack.name.slice(0, 120),
+          cardCount: boundedCards.length,
+          cards: boundedCards,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const payload: Record<string, unknown> = {
+          ownerId: uid,
+          packId: docId,
+          name: pack.name.slice(0, 120),
+          source: pack.source,
+          cardCount: boundedCards.length,
+          cards: boundedCards,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        if (pack.sourceUrl) {
+          payload.sourceUrl = pack.sourceUrl.slice(0, 400);
+        }
+        await setDoc(doc(db, 'users', uid, 'vault_packs', docId), payload);
+      }
+    } catch (err) {
+      handleFirestoreError(err, isUpdate ? OperationType.UPDATE : OperationType.CREATE, path);
     }
   }, []);
 
@@ -972,6 +1037,40 @@ export function useWarRoomStore() {
             (err) => handleFirestoreError(err, OperationType.LIST, `users/${uid}/trace_tables`)
           )
         );
+
+        unsubscribes.push(
+          onSnapshot(
+            query(collection(db, 'users', uid, 'vault_packs'), where('ownerId', '==', uid)),
+            (snap) => {
+              const packs: VaultPack[] = [];
+              snap.forEach((docSnap) => {
+                const d = docSnap.data();
+                const rawCards = Array.isArray(d.cards) ? (d.cards as VaultCard[]) : [];
+                if (rawCards.length === 0) return;
+                const createdMs =
+                  typeof d.createdAt?.toMillis === 'function' ? d.createdAt.toMillis() : Date.now();
+                const updatedMs =
+                  typeof d.updatedAt?.toMillis === 'function' ? d.updatedAt.toMillis() : createdMs;
+                packs.push({
+                  packId: String(d.packId ?? docSnap.id),
+                  name: String(d.name ?? 'Imported Pack'),
+                  source:
+                    d.source === 'GitHub Sync' || d.source === 'Custom'
+                      ? d.source
+                      : 'JSON Import',
+                  sourceUrl: typeof d.sourceUrl === 'string' && d.sourceUrl ? d.sourceUrl : undefined,
+                  cardCount: rawCards.length,
+                  cards: rawCards,
+                  createdAt: createdMs,
+                  updatedAt: updatedMs,
+                });
+              });
+              packs.sort((a, b) => b.updatedAt - a.updatedAt);
+              setState((prev) => ({ ...prev, vaultPacks: packs }));
+            },
+            (err) => handleFirestoreError(err, OperationType.LIST, `users/${uid}/vault_packs`)
+          )
+        );
       } catch (err) {
         setSyncStatus('error');
         console.error('Firestore bootstrap failed:', err);
@@ -1018,19 +1117,52 @@ export function useWarRoomStore() {
     return combined;
   }, [gaterQuestions, state.customQuestions, state.verifiedAnswers]);
 
-  const allTips = useMemo(() => {
+  // Unified Vault Cards: Imported/GitHub Packs + Mined Mistakes (₹0) + Legacy Custom/Traps + 132-Card Master Bundle
+  const allVaultCards = useMemo<VaultCard[]>(() => {
     const seen = new Set<string>();
-    const merged: TipItem[] = [];
-    for (const list of [state.trapsVault, state.customTips, GATE_TIPS]) {
-      for (const item of list) {
-        const key = item.title.trim().toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        merged.push(item);
+    const merged: VaultCard[] = [];
+
+    const pushUnique = (card: VaultCard) => {
+      const fp = cardFingerprint(card.subject, card.title);
+      if (seen.has(fp)) return;
+      seen.add(fp);
+      merged.push(card);
+    };
+
+    // 1. User's Bulk JSON Imported & GitHub-Synced Packs (highest priority so user edits/packs surface cleanly)
+    for (const pack of state.vaultPacks) {
+      for (const card of pack.cards) {
+        pushUnique({ ...card, packId: pack.packId, packName: pack.name });
       }
     }
+
+    // 2. Auto-mined local cards from unresolved Mistake Bucket (100% local, ₹0)
+    const mistakeCards = mineMistakesToVaultCards(state.mistakes, allQuestions);
+    for (const mc of mistakeCards) {
+      pushUnique(mc);
+    }
+
+    // 3. Legacy customTips & trapsVault cards (preserved for full backward compatibility)
+    for (const t of state.customTips) {
+      pushUnique(tipItemToVaultCard(t, 'Custom'));
+    }
+    for (const t of state.trapsVault) {
+      pushUnique(tipItemToVaultCard(t, t.trapSource === 'mistake_mined' ? 'My Mistakes' : 'Custom'));
+    }
+
+    // 4. Built-in 132-Card Offline Master Bundle (all 11 IIT Madras GATE CSE 2027 subjects)
+    for (const masterCard of GATE_2027_MASTER_VAULT) {
+      pushUnique(masterCard);
+    }
+
     return merged;
-  }, [state.trapsVault, state.customTips]);
+  }, [state.vaultPacks, state.mistakes, allQuestions, state.customTips, state.trapsVault]);
+
+  // Legacy TipItem view derived from unified Vault so DashboardView & RapidRevisionView enjoy all 132+ cards seamlessly
+  const allTips = useMemo<TipItem[]>(
+    () => allVaultCards.map(vaultCardToTipItem),
+    [allVaultCards]
+  );
 
   const existingFingerprints = useMemo(
     () =>
@@ -1883,6 +2015,204 @@ export function useWarRoomStore() {
     }
   }, []);
 
+  // ===================== UNIFIED VAULT PACK & CARD MUTATIONS (₹0 OFFLINE + FIRESTORE) =====================
+
+  const importVaultPack = useCallback(
+    (pack: VaultPack): { addedPacks: number; addedCards: number } => {
+      const chunks = splitPackForFirestore(pack, 150);
+      setState((prev) => ({
+        ...prev,
+        vaultPacks: [...chunks, ...prev.vaultPacks],
+      }));
+
+      const uid = userRef.current?.uid;
+      if (uid) {
+        for (const chunk of chunks) {
+          void persistVaultPack(uid, chunk, false);
+        }
+      }
+      return {
+        addedPacks: chunks.length,
+        addedCards: chunks.reduce((acc, c) => acc + c.cardCount, 0),
+      };
+    },
+    [persistVaultPack]
+  );
+
+  const deleteVaultPack = useCallback((packId: string) => {
+    setState((prev) => ({
+      ...prev,
+      vaultPacks: prev.vaultPacks.filter((p) => p.packId !== packId),
+    }));
+
+    const uid = userRef.current?.uid;
+    if (uid) {
+      const docId = sanitizeDocId(packId);
+      const path = `users/${uid}/vault_packs/${docId}`;
+      deleteDoc(doc(db, 'users', uid, 'vault_packs', docId)).catch((err) =>
+        handleFirestoreError(err, OperationType.DELETE, path)
+      );
+    }
+  }, []);
+
+  const addCustomVaultCard = useCallback(
+    (cardInput: Omit<VaultCard, 'id' | 'source' | 'createdAt' | 'packId' | 'packName'>) => {
+      const now = Date.now();
+      const existingCustomPack = stateRef.current.vaultPacks.find(
+        (p) => p.source === 'Custom' && p.cards.length < 150
+      );
+      const targetPackId = existingCustomPack
+        ? existingCustomPack.packId
+        : sanitizeDocId(`pack_custom_${now}`);
+      const targetPackName = existingCustomPack ? existingCustomPack.name : 'My Custom Cards';
+
+      const newCard: VaultCard = {
+        ...cardInput,
+        id: sanitizeDocId(`vc_custom_${now}_${Math.random().toString(36).slice(2, 5)}`),
+        source: 'Custom',
+        packId: targetPackId,
+        packName: targetPackName,
+        createdAt: now,
+      };
+
+      let nextPack: VaultPack;
+      let isUpdate = false;
+      if (existingCustomPack) {
+        isUpdate = true;
+        nextPack = {
+          ...existingCustomPack,
+          cards: [newCard, ...existingCustomPack.cards],
+          cardCount: existingCustomPack.cards.length + 1,
+          updatedAt: now,
+        };
+        setState((prev) => ({
+          ...prev,
+          vaultPacks: prev.vaultPacks.map((p) => (p.packId === targetPackId ? nextPack : p)),
+        }));
+      } else {
+        nextPack = {
+          packId: targetPackId,
+          name: targetPackName,
+          source: 'Custom',
+          cardCount: 1,
+          cards: [newCard],
+          createdAt: now,
+          updatedAt: now,
+        };
+        setState((prev) => ({
+          ...prev,
+          vaultPacks: [nextPack, ...prev.vaultPacks],
+        }));
+      }
+
+      const uid = userRef.current?.uid;
+      if (uid) {
+        void persistVaultPack(uid, nextPack, isUpdate);
+      }
+      return newCard;
+    },
+    [persistVaultPack]
+  );
+
+  const deleteVaultCard = useCallback(
+    (cardId: string) => {
+      // Check if card lives inside a VaultPack
+      const owningPack = stateRef.current.vaultPacks.find((p) =>
+        p.cards.some((c) => c.id === cardId)
+      );
+      if (owningPack) {
+        const remaining = owningPack.cards.filter((c) => c.id !== cardId);
+        if (remaining.length === 0) {
+          deleteVaultPack(owningPack.packId);
+          return;
+        }
+        const updatedPack: VaultPack = {
+          ...owningPack,
+          cards: remaining,
+          cardCount: remaining.length,
+          updatedAt: Date.now(),
+        };
+        setState((prev) => ({
+          ...prev,
+          vaultPacks: prev.vaultPacks.map((p) =>
+            p.packId === owningPack.packId ? updatedPack : p
+          ),
+        }));
+        const uid = userRef.current?.uid;
+        if (uid) {
+          void persistVaultPack(uid, updatedPack, true);
+        }
+        return;
+      }
+
+      // Fallback: delete from legacy customTips / trapsVault
+      deleteCustomTip(cardId);
+    },
+    [deleteVaultPack, persistVaultPack, deleteCustomTip]
+  );
+
+  const syncVaultFromGithub = useCallback(
+    async (
+      url: string,
+      packName?: string
+    ): Promise<{ ok: boolean; addedCards: number; duplicatesSkipped?: number; message: string }> => {
+      try {
+        const resp = await fetch('/api/sync-vault-github', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, packName }),
+        });
+        const data = (await resp.json()) as {
+          ok: boolean;
+          pack?: VaultPack;
+          message?: string;
+        };
+        if (!data.ok || !data.pack) {
+          return {
+            ok: false,
+            addedCards: 0,
+            message: data.message || 'Could not sync bundle from GitHub.',
+          };
+        }
+
+        // Deduplicate against current Vault cards before saving
+        const existingFps = new Set(allVaultCards.map((c) => cardFingerprint(c.subject, c.title)));
+        const freshCards = data.pack.cards.filter(
+          (c) => !existingFps.has(cardFingerprint(c.subject, c.title))
+        );
+        const skipped = data.pack.cards.length - freshCards.length;
+        if (freshCards.length === 0) {
+          return {
+            ok: true,
+            addedCards: 0,
+            duplicatesSkipped: skipped,
+            message: `Already up to date (${skipped} cards already in your Vault).`,
+          };
+        }
+
+        const dedupedPack: VaultPack = {
+          ...data.pack,
+          cards: freshCards,
+          cardCount: freshCards.length,
+        };
+        importVaultPack(dedupedPack);
+        return {
+          ok: true,
+          addedCards: freshCards.length,
+          duplicatesSkipped: skipped,
+          message: `Synced ${freshCards.length} new card(s) from GitHub${skipped > 0 ? ` (${skipped} duplicates skipped)` : ''} · ₹0 cost.`,
+        };
+      } catch {
+        return {
+          ok: false,
+          addedCards: 0,
+          message: 'Network error contacting GitHub sync proxy.',
+        };
+      }
+    },
+    [allVaultCards, importVaultPack]
+  );
+
   const recordSrsRating = useCallback(
     (itemType: SrsItemType, itemId: string, rating: SrsRating) => {
       const cardId = makeSrsCardId(itemType, itemId);
@@ -1942,7 +2272,7 @@ export function useWarRoomStore() {
       const existingTitles = [
         ...currState.trapsVault.map((t) => t.title),
         ...currState.customTips.map((t) => t.title),
-        ...GATE_TIPS.map((t) => t.title),
+        ...GATE_2027_MASTER_VAULT.map((t) => t.title),
       ];
 
       // Determine weakest subjects from syllabus + unresolved mistakes
@@ -2139,17 +2469,10 @@ export function useWarRoomStore() {
     ]
   );
 
+  // Disabled automatic load-time Gemini API call so opening the Vault is 100% offline, instant, and zero-error!
   const ensureDailyTrapsLoaded = useCallback(() => {
-    const todayIst = getIstDateString();
-    if (stateRef.current.lastTrapsIstDate === todayIst) return;
-    if (dailyTrapsAutoAttemptedRef.current === todayIst) return;
-    const hasTodayTrap = stateRef.current.trapsVault.some(
-      (t) => t.generatedDateIst === todayIst && t.trapSource === 'ai_daily'
-    );
-    if (hasTodayTrap) return;
-    dailyTrapsAutoAttemptedRef.current = todayIst;
-    void generateFreshTraps({ subjectId: 'all', mode: 'daily', count: 5, skipCooldown: true });
-  }, [generateFreshTraps]);
+    // Intentionally a zero-API no-op: Vault is powered by the 132-card Offline Master Bundle + JSON/GitHub Packs.
+  }, []);
 
   const addMockTest = useCallback((mock: Omit<MockTestEntry, 'id'>) => {
     const newMock: MockTestEntry = {
@@ -2346,6 +2669,9 @@ export function useWarRoomStore() {
       }
       for (const qId of Object.keys(stateRef.current.traceTables)) {
         batch.delete(doc(db, 'users', uid, 'trace_tables', sanitizeDocId(qId)));
+      }
+      for (const pack of stateRef.current.vaultPacks) {
+        batch.delete(doc(db, 'users', uid, 'vault_packs', sanitizeDocId(pack.packId)));
       }
       await batch.commit();
     } catch (err) {
@@ -2600,6 +2926,7 @@ export function useWarRoomStore() {
     gaterError,
     allQuestions,
     allTips,
+    allVaultCards,
     signInWithGoogle: handleSignInGoogle,
     signOut: handleSignOut,
     syncGateRFromRepo,
@@ -2634,6 +2961,11 @@ export function useWarRoomStore() {
     toggleTipBookmark,
     addCustomTip,
     deleteCustomTip,
+    importVaultPack,
+    deleteVaultPack,
+    addCustomVaultCard,
+    deleteVaultCard,
+    syncVaultFromGithub,
     addMockTest,
     deleteMockTest,
     updateSettings,

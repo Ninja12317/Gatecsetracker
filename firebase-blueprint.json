@@ -792,6 +792,51 @@
         }
       },
       "required": ["ownerId", "questionId", "presetName", "columns", "rows", "updatedAt"]
+    },
+    "VaultPack": {
+      "title": "VaultPack",
+      "description": "Bulk-imported JSON or GitHub-synced pack of GATE CSE 2027 Formula, Trap, Shortcut, and Edge-Case cards stored as a bounded native list of maps (max 150 cards per pack chunk).",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "packId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "source": {
+          "type": "string",
+          "enum": ["GitHub Sync", "JSON Import", "Custom"]
+        },
+        "sourceUrl": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "cardCount": {
+          "type": "number"
+        },
+        "cards": {
+          "type": "array",
+          "description": "Bounded native list of up to 150 VaultCard maps."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "packId", "name", "source", "cardCount", "cards", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -854,6 +899,10 @@
     "/users/{userId}/trace_tables/{questionId}": {
       "schema": { "$ref": "#/entities/DryRunTraceTable" },
       "description": "Structured dry-run trace tables saved per PYQ questionId."
+    },
+    "/users/{userId}/vault_packs/{packId}": {
+      "schema": { "$ref": "#/entities/VaultPack" },
+      "description": "Bulk JSON imported and GitHub-synced Formula & Trap Vault packs synced across devices."
     }
   }
 }

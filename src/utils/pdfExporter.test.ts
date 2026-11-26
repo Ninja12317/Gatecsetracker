@@ -78,7 +78,7 @@ function makeMinimalState(): WarRoomState {
     traceTables: {
       'q-test-1': {
         questionId: 'q-test-1',
-        preset: 'c_trace',
+        presetName: 'c_trace',
         columns: ['Step', 'u', 'dist[u]'],
         rows: [
           { id: 'r1', cells: ['1', '0', '0'] },
@@ -92,6 +92,7 @@ function makeMinimalState(): WarRoomState {
     bookmarkedTips: [],
     customTips: [],
     trapsVault: [],
+    vaultPacks: [],
     srsCards: {},
     mocks: [
       {

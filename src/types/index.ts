@@ -175,6 +175,54 @@ export interface TipItem {
   sourceQuestionId?: string;
 }
 
+export type GateSubject = SubjectId;
+
+export type VaultKind =
+  | 'FORMULA'
+  | 'TRAP'
+  | 'SHORTCUT'
+  | 'TIP'
+  | 'COUNTER_EXAMPLE'
+  | 'EDGE_CASE';
+
+export type VaultSource =
+  | 'Master Bundle'
+  | 'GitHub Sync'
+  | 'JSON Import'
+  | 'My Mistakes'
+  | 'Custom';
+
+export interface VaultCard {
+  id: string;
+  subject: GateSubject;
+  subtopic: string;
+  tagMatchKeywords: string[];
+  kind: VaultKind;
+  highYield: boolean;
+  title: string;
+  formulaLatex?: string;
+  codeSnippet?: string;
+  commonTrap?: string;
+  gateTruth: string;
+  quickExample?: string;
+  source: VaultSource;
+  packId?: string;
+  packName?: string;
+  outOf2027Syllabus?: boolean;
+  createdAt?: number;
+}
+
+export interface VaultPack {
+  packId: string;
+  name: string;
+  source: 'GitHub Sync' | 'JSON Import' | 'Custom';
+  sourceUrl?: string;
+  cardCount: number;
+  cards: VaultCard[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export type SrsRating = 'hard' | 'good' | 'mastered';
 export type SrsItemType = 'mistake' | 'trap';
 
@@ -389,6 +437,7 @@ export interface WarRoomState {
   bookmarkedTips: string[];
   customTips: TipItem[];
   trapsVault: TipItem[];
+  vaultPacks: VaultPack[];
   srsCards: Record<string, SrsCardRecord>;
   mocks: MockTestEntry[];
 }

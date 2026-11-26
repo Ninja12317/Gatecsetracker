@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ArrowLeft, ArrowRight, AlertTriangle } from 'lucide-react';
-import type { NavView, PdfExportRequest, SubjectId } from './types';
+import type { NavView, PdfExportRequest, Question, SubjectId, VaultCard } from './types';
 import { useWarRoomStore } from './hooks/useWarRoomStore';
 import {
   computeStudyStreak,
@@ -8,6 +8,7 @@ import {
   toLocalIsoDate,
 } from './utils/gateMath';
 import { isSrsCardDueToday, makeSrsCardId } from './utils/examPolish';
+import { matchPyqsForVaultCard } from './utils/vaultImporter';
 import {
   VIEW_HEADER_TITLES,
   popHistoryEntry,
@@ -80,6 +81,11 @@ export default function App() {
   const [launchSketchpadSprintTrigger, setLaunchSketchpadSprintTrigger] = useState(0);
   const [exitPyqSessionTrigger, setExitPyqSessionTrigger] = useState(0);
   const [resetPyqStudioTabTrigger, setResetPyqStudioTabTrigger] = useState(0);
+  const [vaultDrillRequest, setVaultDrillRequest] = useState<{
+    nonce: number;
+    title: string;
+    questions: Question[];
+  } | null>(null);
   const [confirmExitTimedTestOpen, setConfirmExitTimedTestOpen] = useState(false);
 
   const [pyqSessionInfo, setPyqSessionInfo] = useState<{
@@ -292,6 +298,24 @@ export default function App() {
   const handleJumpToFocusTimer = useCallback(() => {
     navigateTo('focus');
   }, [navigateTo]);
+
+  const handleDrillMatchingPyqs = useCallback(
+    (card: VaultCard) => {
+      const matched = matchPyqsForVaultCard(card, store.allQuestions, 12);
+      if (matched.length === 0) {
+        handlePdfDownloadSuccess('No matching PYQs found in bank for this topic yet.');
+        return;
+      }
+      const subjCode = SUBJECT_MAP[card.subject]?.code ?? card.subject.toUpperCase();
+      setVaultDrillRequest({
+        nonce: Date.now(),
+        title: `${subjCode} Vault Drill · ${card.subtopic}`,
+        questions: matched,
+      });
+      navigateTo('pyq', { subContext: `pyq:vault_${card.subject}`, label: `${subjCode} Drill` });
+    },
+    [store.allQuestions, navigateTo, handlePdfDownloadSuccess]
+  );
 
   const handlePyqSessionStateChange = useCallback(
     (info: {
@@ -616,6 +640,7 @@ export default function App() {
               onSessionStateChange={handlePyqSessionStateChange}
               exitSessionTrigger={exitPyqSessionTrigger}
               resetStudioTabTrigger={resetPyqStudioTabTrigger}
+              vaultDrillRequest={vaultDrillRequest}
             />
           )}
 
@@ -639,18 +664,18 @@ export default function App() {
 
           {activeView === 'tips' && (
             <TipsVaultView
-              allTips={store.allTips}
+              allVaultCards={store.allVaultCards}
+              vaultPacks={store.state.vaultPacks}
               bookmarkedTips={store.state.bookmarkedTips}
               unresolvedMistakesCount={unresolvedMistakesCount}
-              lastTrapsIstDate={store.state.lastTrapsIstDate}
-              trapsGenerating={store.trapsGenerating}
-              trapsCooldownUntil={store.trapsCooldownUntil}
-              trapsNotice={store.trapsNotice}
-              onEnsureDailyTraps={store.ensureDailyTrapsLoaded}
-              onGenerateFreshTraps={store.generateFreshTraps}
               onToggleBookmark={store.toggleTipBookmark}
-              onAddCustomTip={store.addCustomTip}
-              onDeleteCustomTip={store.deleteCustomTip}
+              onImportVaultPack={store.importVaultPack}
+              onDeleteVaultPack={store.deleteVaultPack}
+              onAddCustomVaultCard={store.addCustomVaultCard}
+              onDeleteVaultCard={store.deleteVaultCard}
+              onSyncVaultFromGithub={store.syncVaultFromGithub}
+              onDrillMatchingPyqs={handleDrillMatchingPyqs}
+              onNotify={handlePdfDownloadSuccess}
             />
           )}
 

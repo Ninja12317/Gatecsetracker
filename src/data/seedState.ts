@@ -63,6 +63,7 @@ export function createInitialWarRoomState(): WarRoomState {
     bookmarkedTips: [],
     customTips: [],
     trapsVault: [],
+    vaultPacks: [],
     srsCards: {},
     mocks: [],
   };

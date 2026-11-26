@@ -5,6 +5,7 @@ import type {
   PdfExportLayout,
   PdfExportRequest,
   Question,
+  VaultCard,
   WarRoomState,
 } from '../types';
 import { GATE_2027_SYLLABUS, SUBJECT_MAP } from '../data/syllabus';
@@ -1080,6 +1081,172 @@ export async function downloadDirectPdf(
       pageCount: 0,
       sizeBytes: 0,
       error: err instanceof Error ? err.message : 'PDF generation failed unexpectedly.',
+    };
+  }
+}
+
+/**
+ * Pure jsPDF A4 Formula, Traps & Tricks Cheat Sheet builder.
+ * Groups cards by GATE CSE 2027 subject in crisp IIT Madras maroon/gold/ivory tables
+ * with "Built by Nihal Pawar" page footers. Works identically in browser and Node.
+ */
+export function buildVaultCheatSheetPdf(
+  cards: VaultCard[],
+  options?: {
+    title?: string;
+    subtitle?: string;
+    generatedAt?: string;
+  }
+): { doc: jsPDF; filename: string; pageCount: number } {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const generatedAt = options?.generatedAt ?? new Date().toISOString();
+  const dateLabel = new Date(generatedAt).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+  const title = options?.title || 'GATE CSE 2027 · Traps, Tricks & Formula Cheat Sheet';
+  const subtitle =
+    options?.subtitle ||
+    `${cards.length} Exam-Grade Cards · IIT Madras 2027 Syllabus`;
+  const filename = sanitizePdfFilename('Formula_Trap_CheatSheet', generatedAt);
+  const margin = 14;
+
+  let y = drawIitmBanner(doc, title, subtitle, dateLabel);
+
+  if (cards.length === 0) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(...MUTED);
+    doc.text('No vault cards matched the current filter.', margin, y + 6);
+    const pageCount = stampFooters(doc);
+    return { doc, filename, pageCount };
+  }
+
+  // Group cards cleanly by official 11-subject order
+  const subjectOrder = GATE_2027_SYLLABUS.map((s) => s.id);
+  const grouped = new Map<string, VaultCard[]>();
+  for (const sid of subjectOrder) {
+    grouped.set(sid, []);
+  }
+  for (const card of cards) {
+    const arr = grouped.get(card.subject) ?? [];
+    arr.push(card);
+    grouped.set(card.subject, arr);
+  }
+
+  for (const sid of subjectOrder) {
+    const list = grouped.get(sid) ?? [];
+    if (list.length === 0) continue;
+    const subj = SUBJECT_MAP[sid];
+
+    y = ensureSpace(doc, y, 22);
+    doc.setFillColor(...IVORY);
+    doc.setDrawColor(...GOLD);
+    doc.roundedRect(margin, y, doc.internal.pageSize.getWidth() - margin * 2, 8.5, 2, 2, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(...MAROON);
+    doc.text(
+      `${subj?.code ?? sid.toUpperCase()} — ${subj?.name ?? sid.toUpperCase()} (${list.length} cards)`,
+      margin + 3.5,
+      y + 5.7
+    );
+    y += 11;
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: margin, right: margin, bottom: 18 },
+      head: [['Card / Type', 'Formula / Snippet', 'GATE Truth & Common Trap']],
+      body: list.map((c) => {
+        const badge = `${c.kind.replace('_', ' ')}${c.highYield ? ' [HIGH-YIELD]' : ''}${c.outOf2027Syllabus ? ' [2027 REMOVED]' : ''}`;
+        const leftCol = stripHtmlAndLatexForPdf(
+          `${c.title}\n(${c.subtopic} · ${badge})`
+        );
+        const formulaOrCode = c.formulaLatex
+          ? stripHtmlAndLatexForPdf(c.formulaLatex)
+          : c.codeSnippet
+          ? stripHtmlAndLatexForPdf(c.codeSnippet).slice(0, 260)
+          : '—';
+        const truthParts = [
+          `TRUTH: ${stripHtmlAndLatexForPdf(c.gateTruth)}`,
+          c.commonTrap ? `TRAP: ${stripHtmlAndLatexForPdf(c.commonTrap)}` : '',
+          c.quickExample ? `EX: ${stripHtmlAndLatexForPdf(c.quickExample)}` : '',
+        ].filter(Boolean);
+        return [leftCol, formulaOrCode, truthParts.join('\n')];
+      }),
+      styles: {
+        font: 'helvetica',
+        fontSize: 7.6,
+        textColor: INK,
+        cellPadding: 2.2,
+        lineColor: BORDER,
+        lineWidth: 0.2,
+        valign: 'top',
+      },
+      headStyles: {
+        fillColor: MAROON,
+        textColor: [255, 253, 249],
+        fontStyle: 'bold',
+        fontSize: 7.8,
+      },
+      alternateRowStyles: {
+        fillColor: IVORY,
+      },
+      columnStyles: {
+        0: { cellWidth: 44, fontStyle: 'bold', textColor: MAROON },
+        1: { cellWidth: 48, font: 'courier', fontSize: 7.2 },
+        2: { cellWidth: 'auto' },
+      },
+    });
+
+    y =
+      ((doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ??
+        y + 24) + 6;
+  }
+
+  const pageCount = stampFooters(doc);
+  return { doc, filename, pageCount };
+}
+
+/**
+ * Direct A4 Formula Cheat Sheet `.pdf` downloader (works in sandboxed iframes & mobile WebViews).
+ */
+export async function downloadVaultCheatSheetPdf(
+  cards: VaultCard[],
+  options?: { title?: string; subtitle?: string }
+): Promise<DirectPdfResult> {
+  try {
+    const { doc, filename, pageCount } = buildVaultCheatSheetPdf(cards, options);
+    const blob = doc.output('blob');
+    const sizeBytes = blob.size;
+
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = 'noopener';
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+
+    window.setTimeout(() => {
+      try {
+        document.body.removeChild(anchor);
+      } catch {
+        // ignore
+      }
+      URL.revokeObjectURL(url);
+    }, 1500);
+
+    return { ok: true, filename, pageCount, sizeBytes };
+  } catch (err) {
+    return {
+      ok: false,
+      filename: '',
+      pageCount: 0,
+      sizeBytes: 0,
+      error: err instanceof Error ? err.message : 'Cheat Sheet PDF generation failed.',
     };
   }
 }

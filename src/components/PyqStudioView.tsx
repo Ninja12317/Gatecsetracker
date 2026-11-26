@@ -102,6 +102,7 @@ interface PyqStudioViewProps {
   }) => void;
   exitSessionTrigger?: number;
   resetStudioTabTrigger?: number;
+  vaultDrillRequest?: { nonce: number; title: string; questions: Question[] } | null;
 }
 
 type StudioTab = 'practice' | 'mistakes' | 'resources';
@@ -151,6 +152,7 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
   onSessionStateChange,
   exitSessionTrigger = 0,
   resetStudioTabTrigger = 0,
+  vaultDrillRequest = null,
 }) => {
   const [studioTab, setStudioTab] = useState<StudioTab>('practice');
   const [session, setSession] = useState<ActiveCbtSession | null>(null);
@@ -336,6 +338,14 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
       setStudioTab('mistakes');
     }
   }, [openMistakesTrigger]);
+
+  // Launch targeted GateR PYQ drill straight from Formula & Trap Vault card
+  useEffect(() => {
+    if (vaultDrillRequest && vaultDrillRequest.nonce > 0 && vaultDrillRequest.questions.length > 0) {
+      startSession(vaultDrillRequest.title, vaultDrillRequest.questions, 'practice_sprint');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vaultDrillRequest?.nonce]);
 
   const mistakeEntries = useMemo(() => {
     const qMap = new Map(allQuestions.map((q) => [q.id, q]));
