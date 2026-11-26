@@ -10,8 +10,11 @@ import {
   RefreshCw,
   Link2,
   FileDown,
+  ChevronDown,
+  SlidersHorizontal,
 } from 'lucide-react';
 import type {
+  DailyTestRecord,
   DryRunTraceTable,
   ErrorTag,
   GateRSyncStatus,
@@ -24,27 +27,59 @@ import type {
 import { GATE_2027_SYLLABUS, SUBJECT_MAP } from '../data/syllabus';
 import { OPEN_RESOURCES, SAMPLE_IMPORT_JSON } from '../data/resources';
 import {
-  generateMixedDppQuestions,
+  evaluateQuestionResponse,
   validateImportedQuestionsJson,
 } from '../utils/gateMath';
-import {
-  computeGaStreakMetrics,
-  selectDailyGaSprintQuestions,
-} from '../utils/gaStreak';
+import { computeGaStreakMetrics } from '../utils/gaStreak';
+import { getIstDateString } from '../utils/pyqServerHelpers';
+import { applyVerifiedAnswer } from '../utils/gaterNormalizer';
 import type { SubjectFetchResult, UrlIngestResult } from '../hooks/useWarRoomStore';
 import { PyqTestBuilder, type SessionMode } from './PyqTestBuilder';
-import { PyqCbtSession, type ActiveCbtSession } from './PyqCbtSession';
+import { PyqCbtSession, type ActiveCbtSession, type UserResponse } from './PyqCbtSession';
 import { RichQuestionContent } from './RichQuestionContent';
+
+interface DailyCompletionPayload {
+  dateIst?: string;
+  questionIds: string[];
+  score: number;
+  maxMarks: number;
+  accuracy: number;
+  attemptedCount: number;
+  correctCount: number;
+  durationSeconds?: number;
+  responses?: Record<string, string>;
+}
 
 interface PyqStudioViewProps {
   state: WarRoomState;
   allQuestions: Question[];
+  simpleMode?: boolean;
   autoStartDppTrigger: number;
+  autoReviewDppTrigger?: number;
   autoStartGaSprintTrigger?: number;
+  autoReviewGaTrigger?: number;
   openMistakesTrigger?: number;
   launchSketchpadSprintTrigger?: number;
+  onGetOrCreateTodayDailyDpp: () => {
+    todayIst: string;
+    record: DailyTestRecord;
+    questions: Question[];
+    rolledOverPool: boolean;
+  };
+  onCompleteDailyDpp: (payload: DailyCompletionPayload) => void;
+  onGetOrCreateTodayDailyGa: () => {
+    todayIst: string;
+    record: DailyTestRecord;
+    questions: Question[];
+    rolledOverPool: boolean;
+  };
+  onCompleteDailyGa: (payload: DailyCompletionPayload) => void;
   gaterSyncStatus: GateRSyncStatus;
   gaterCount: number;
+  arshanCount?: number;
+  enrichedCount?: number;
+  verifiedBankCount?: number;
+  syncProgressMsg?: string;
   gaterSyncedAt: string;
   gaterError: string;
   subjectFetching: SubjectId | null;
@@ -52,6 +87,7 @@ interface PyqStudioViewProps {
   urlIngestLoading: boolean;
   quotaNotice: string;
   onResyncGateR: () => Promise<unknown>;
+  onNotify?: (msg: string) => void;
   onSaveVerifiedAnswer: (
     record: Omit<VerifiedAnswerRecord, 'updatedAt'>
   ) => Promise<VerifiedAnswerRecord>;
@@ -117,12 +153,23 @@ const ERROR_TAGS: ErrorTag[] = [
 export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
   state,
   allQuestions,
+  simpleMode = false,
   autoStartDppTrigger,
+  autoReviewDppTrigger = 0,
   autoStartGaSprintTrigger = 0,
+  autoReviewGaTrigger = 0,
   openMistakesTrigger = 0,
   launchSketchpadSprintTrigger = 0,
+  onGetOrCreateTodayDailyDpp,
+  onCompleteDailyDpp,
+  onGetOrCreateTodayDailyGa,
+  onCompleteDailyGa,
   gaterSyncStatus,
   gaterCount,
+  arshanCount = 0,
+  enrichedCount = 0,
+  verifiedBankCount,
+  syncProgressMsg = '',
   gaterSyncedAt,
   gaterError,
   subjectFetching,
@@ -130,6 +177,7 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
   urlIngestLoading,
   quotaNotice,
   onResyncGateR,
+  onNotify,
   onSaveVerifiedAnswer,
   onVerifySinglePyq,
   onFetchSubjectPyqs,
@@ -157,6 +205,7 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
   const [studioTab, setStudioTab] = useState<StudioTab>('practice');
   const [session, setSession] = useState<ActiveCbtSession | null>(null);
   const [sketchpadOpen, setSketchpadOpen] = useState<boolean>(false);
+  const [moreToolsOpen, setMoreToolsOpen] = useState<boolean>(false);
 
   // Notify parent App about active PYQ test session / sketchpad / sub-tab for Mobile Bottom Nav & Contextual Back
   useEffect(() => {
@@ -261,26 +310,35 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
   );
 
   const handleLaunchDailyDpp = useCallback(() => {
-    const inSyllabus = allQuestions.filter((q) => !q.isOutOf2027Syllabus);
-    const dpp = generateMixedDppQuestions(
-      inSyllabus.length >= 10 ? inSyllabus : allQuestions,
-      GATE_2027_SYLLABUS,
-      state.progress,
-      state.attempts,
-      10
-    );
-    startSession('Daily Mixed DPP · 10 High-ROI Questions', dpp, 'cbt_mock');
-  }, [allQuestions, state.progress, state.attempts, startSession]);
-
-  const handleLaunchGaSprint = useCallback(() => {
-    const gaPool = selectDailyGaSprintQuestions(allQuestions, state.attempts, 5);
-    const chosen = gaPool.length > 0 ? gaPool : allQuestions.slice(0, 5);
-    if (chosen.length === 0) return;
+    const { todayIst, questions } = onGetOrCreateTodayDailyDpp();
+    if (questions.length === 0) return;
     setStudioTab('practice');
     setSession({
-      title: `Daily 10-Min GA Lock-In Sprint (${chosen.length} Qs)`,
+      title: `Daily Mixed DPP · ${todayIst} (${questions.length} Unseen Qs)`,
       mode: 'cbt_mock',
-      questions: chosen,
+      questions,
+      secondsRemaining: Math.max(300, questions.length * 180),
+      elapsedSeconds: 0,
+      questionSeconds: {},
+      currentIndex: 0,
+      responses: {},
+      checked: {},
+      markedForReview: {},
+      visited: { [questions[0].id]: true },
+      finished: false,
+      dailyKind: 'dpp',
+      dailyDateIst: todayIst,
+    });
+  }, [onGetOrCreateTodayDailyDpp]);
+
+  const handleLaunchGaSprint = useCallback(() => {
+    const { todayIst, questions } = onGetOrCreateTodayDailyGa();
+    if (questions.length === 0) return;
+    setStudioTab('practice');
+    setSession({
+      title: `Daily 10-Min GA Test · ${todayIst} (${questions.length} Qs)`,
+      mode: 'cbt_mock',
+      questions,
       secondsRemaining: 600,
       elapsedSeconds: 0,
       questionSeconds: {},
@@ -288,11 +346,78 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
       responses: {},
       checked: {},
       markedForReview: {},
-      visited: { [chosen[0].id]: true },
+      visited: { [questions[0].id]: true },
       finished: false,
       isGaSprint: true,
+      dailyKind: 'ga',
+      dailyDateIst: todayIst,
     });
-  }, [allQuestions, state.attempts]);
+  }, [onGetOrCreateTodayDailyGa]);
+
+  const handleReviewDailyTest = useCallback(
+    (kind: 'dpp' | 'ga') => {
+      const todayIst = getIstDateString();
+      const map =
+        kind === 'dpp'
+          ? state.dailyProgress.dailyDppByDate
+          : state.dailyProgress.dailyGaByDate;
+      const record =
+        map[todayIst] ??
+        Object.values(map)
+          .filter((r) => r.completed)
+          .sort((a, b) => b.date.localeCompare(a.date))[0];
+      if (!record || record.questionIds.length === 0) return;
+
+      const qById = new Map(allQuestions.map((q) => [q.id, q]));
+      const questions = record.questionIds
+        .map((id) => qById.get(id))
+        .filter((q): q is Question => Boolean(q));
+      if (questions.length === 0) return;
+
+      const responses: Record<string, UserResponse> = {};
+      const checked: ActiveCbtSession['checked'] = {};
+      const visited: Record<string, boolean> = {};
+
+      for (const rawQ of questions) {
+        visited[rawQ.id] = true;
+        const verified = state.verifiedAnswers[rawQ.id];
+        const q = verified ? applyVerifiedAnswer(rawQ, verified) : rawQ;
+        const savedAns = record.responses?.[q.id] ?? '';
+        let resp: UserResponse = {};
+        if (savedAns) {
+          if (q.format === 'MCQ') resp = { selectedOption: savedAns };
+          else if (q.format === 'MSQ')
+            resp = { selectedOptions: savedAns.split(',').filter(Boolean) };
+          else resp = { natValue: savedAns };
+        }
+        responses[q.id] = resp;
+        checked[q.id] = evaluateQuestionResponse(q, resp);
+      }
+
+      setStudioTab('practice');
+      setSession({
+        title:
+          kind === 'dpp'
+            ? `Daily Mixed DPP Review · ${record.date} (${record.score}/${record.maxMarks})`
+            : `Daily 10-Min GA Review · ${record.date} (${record.score}/${record.maxMarks})`,
+        mode: 'cbt_mock',
+        questions,
+        secondsRemaining: 0,
+        elapsedSeconds: record.durationSeconds ?? 0,
+        questionSeconds: {},
+        currentIndex: 0,
+        responses,
+        checked,
+        markedForReview: {},
+        visited,
+        finished: true,
+        isGaSprint: kind === 'ga',
+        dailyKind: kind,
+        dailyDateIst: record.date,
+      });
+    },
+    [state.dailyProgress, state.verifiedAnswers, allQuestions]
+  );
 
   // Auto-launch Daily Mixed DPP when triggered from Dashboard or Command Palette
   useEffect(() => {
@@ -302,6 +427,14 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStartDppTrigger]);
 
+  // Auto-review today's completed Daily Mixed DPP
+  useEffect(() => {
+    if (autoReviewDppTrigger > 0) {
+      handleReviewDailyTest('dpp');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoReviewDppTrigger]);
+
   // Auto-launch Daily 10-Min GA Lock-In Sprint when triggered from Dashboard or Command Palette
   useEffect(() => {
     if (autoStartGaSprintTrigger > 0) {
@@ -309,6 +442,14 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStartGaSprintTrigger]);
+
+  // Auto-review today's completed Daily GA test
+  useEffect(() => {
+    if (autoReviewGaTrigger > 0) {
+      handleReviewDailyTest('ga');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoReviewGaTrigger]);
 
   const gaStreakMetrics = useMemo(
     () => computeGaStreakMetrics(state.gaStreakLogs, state.attempts, allQuestions),
@@ -423,6 +564,8 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
         onSaveTraceTable={onSaveTraceTable}
         onDeleteTraceTable={onDeleteTraceTable}
         onCompleteGaSprint={onCompleteGaSprint}
+        onCompleteDailyDpp={onCompleteDailyDpp}
+        onCompleteDailyGa={onCompleteDailyGa}
         onSaveVerifiedAnswer={onSaveVerifiedAnswer}
         onVerifySinglePyq={onVerifySinglePyq}
         onToggleCalculator={onToggleCalculator}
@@ -437,7 +580,7 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
   return (
     <div className="space-y-6">
       {/* Studio Sub-Navigation Pill Bar (Single-row horizontal rail on mobile, zero vertical stacking) */}
-      <div className="flex flex-nowrap items-center justify-between gap-2 rounded-[24px] sm:rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] px-3 sm:px-5 py-2.5 sm:py-3.5 shadow-warm">
+      <div className="relative flex flex-nowrap items-center justify-between gap-2 rounded-[24px] sm:rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] px-3 sm:px-5 py-2.5 sm:py-3.5 shadow-warm">
         <div className="min-w-0 flex-1 mobile-rail-fade">
           <div
             className="flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 -mx-1"
@@ -453,10 +596,14 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
                 id: 'mistakes' as const,
                 label: `Mistakes (${unresolvedMistakes.length})`,
               },
-              {
-                id: 'resources' as const,
-                label: 'Importers & Resources',
-              },
+              ...(!simpleMode
+                ? [
+                    {
+                      id: 'resources' as const,
+                      label: 'Importers & Resources',
+                    },
+                  ]
+                : []),
             ].map((tab) => {
               const active = studioTab === tab.id;
               return (
@@ -467,6 +614,7 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
                   aria-selected={active}
                   onClick={(e) => {
                     setStudioTab(tab.id);
+                    setMoreToolsOpen(false);
                     e.currentTarget.scrollIntoView({
                       behavior: 'smooth',
                       inline: 'center',
@@ -486,21 +634,70 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            setImportErrors([]);
-            setImportSuccessMsg('');
-            setImportModalOpen(true);
-          }}
-          aria-label="Bulk Import JSON"
-          title="Bulk Import JSON"
-          className="inline-flex items-center gap-1.5 h-9 px-3 sm:px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] hover:bg-[#EFE9DF] dark:hover:bg-[#312722] press-tactile whitespace-nowrap shrink-0"
-        >
-          <Upload className="h-3.5 w-3.5 text-[#6E261A] dark:text-[#E0A92E]" />
-          <span className="hidden sm:inline">Bulk Import JSON</span>
-          <span className="sm:hidden">Import</span>
-        </button>
+        {simpleMode ? (
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setMoreToolsOpen((o) => !o)}
+              data-testid="pyq-more-tools-btn"
+              aria-expanded={moreToolsOpen}
+              className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] hover:bg-[#EFE9DF] dark:hover:bg-[#312722] press-tactile whitespace-nowrap"
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5 text-[#6E261A] dark:text-[#E0A92E]" />
+              <span>More Tools</span>
+              <ChevronDown
+                className={`h-3.5 w-3.5 transition-transform ${moreToolsOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {moreToolsOpen && (
+              <div
+                data-testid="pyq-more-tools-menu"
+                className="absolute right-0 top-11 z-30 w-52 rounded-[20px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-1.5 shadow-warm-lg space-y-1"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreToolsOpen(false);
+                    setImportErrors([]);
+                    setImportSuccessMsg('');
+                    setImportModalOpen(true);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-[14px] text-left text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] hover:bg-[#FAF8F4] dark:hover:bg-[#241D19]"
+                >
+                  <Upload className="h-3.5 w-3.5 text-[#6E261A] dark:text-[#E0A92E]" />
+                  Bulk Import JSON
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreToolsOpen(false);
+                    setStudioTab('resources');
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-[14px] text-left text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] hover:bg-[#FAF8F4] dark:hover:bg-[#241D19]"
+                >
+                  <BookOpen className="h-3.5 w-3.5 text-[#6E261A] dark:text-[#E0A92E]" />
+                  Importers &amp; Resources
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setImportErrors([]);
+              setImportSuccessMsg('');
+              setImportModalOpen(true);
+            }}
+            aria-label="Bulk Import JSON"
+            title="Bulk Import JSON"
+            className="inline-flex items-center gap-1.5 h-9 px-3 sm:px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] hover:bg-[#EFE9DF] dark:hover:bg-[#312722] press-tactile whitespace-nowrap shrink-0"
+          >
+            <Upload className="h-3.5 w-3.5 text-[#6E261A] dark:text-[#E0A92E]" />
+            <span className="hidden sm:inline">Bulk Import JSON</span>
+            <span className="sm:hidden">Import</span>
+          </button>
+        )}
       </div>
 
       {/* TAB 1: FLEXIBLE GATER CBT TEST BUILDER */}
@@ -510,6 +707,10 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
           allQuestions={allQuestions}
           gaterSyncStatus={gaterSyncStatus}
           gaterCount={gaterCount}
+          arshanCount={arshanCount}
+          enrichedCount={enrichedCount}
+          verifiedBankCount={verifiedBankCount}
+          syncProgressMsg={syncProgressMsg}
           gaterSyncedAt={gaterSyncedAt}
           gaterError={gaterError}
           onResyncGateR={onResyncGateR}
@@ -518,6 +719,7 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
           gaStreakMetrics={gaStreakMetrics}
           onStartGaSprint={handleLaunchGaSprint}
           onRequestPdfExport={onRequestPdfExport}
+          onNotify={onNotify}
         />
       )}
 

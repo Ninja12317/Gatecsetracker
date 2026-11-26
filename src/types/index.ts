@@ -78,6 +78,15 @@ export interface StudyLogEntry {
 
 export type QuestionFormat = 'MCQ' | 'MSQ' | 'NAT';
 export type DifficultyLevel = 'Easy' | 'Medium' | 'Hard';
+export type QuestionSourceCategory = 'PYQ' | 'PREDICTED_2027' | 'EXTRA_PRACTICE';
+export type QuestionSourceRepo = 'gater' | 'arshan' | 'merged' | 'seed' | 'custom';
+export type PyqSourceFilter =
+  | 'all'
+  | 'pyq_only'
+  | 'extra_predicted'
+  | 'verified_only'
+  | 'arshan_bank'
+  | 'gater_bank';
 
 export interface QuestionOption {
   id: string; // 'A' | 'B' | 'C' | 'D'
@@ -94,6 +103,8 @@ export interface Question {
   difficulty: DifficultyLevel;
   sourceTag: string; // e.g., "PYQ · GATE 2024" or "GATE CSE 2023"
   sourceUrl?: string;
+  sourceCategory?: QuestionSourceCategory;
+  sourceRepo?: QuestionSourceRepo;
   year?: number;
   paperTag?: string;
   tags?: string[];
@@ -105,9 +116,12 @@ export interface Question {
   hasAnswerKey?: boolean; // True if pre-filled or verified key exists
   isOutOf2027Syllabus?: boolean; // True if tags match removed GATE 2027 syllabus topics
   isGateR?: boolean;
+  isArshan?: boolean;
   correctOption?: string; // For MCQ
   correctOptions?: string[]; // For MSQ (sorted)
   natAnswer?: number; // For NAT
+  natRangeMin?: number; // Optional official GATE NAT inclusive range lower bound
+  natRangeMax?: number; // Optional official GATE NAT inclusive range upper bound
   natTolerance?: number; // e.g. 0.01 or 0
   natUnit?: string;
   explanation: string;
@@ -282,6 +296,15 @@ export interface MockTestEntry {
 }
 
 export type ThemeMode = 'light' | 'dark' | 'system';
+export type AccentThemeId =
+  | 'brown'
+  | 'green'
+  | 'red'
+  | 'blue'
+  | 'teal'
+  | 'graphite'
+  | 'navy'
+  | 'olive';
 export type UiScaleMode = 'compact' | 'default' | 'comfortable';
 export type ContentWidthMode = 'focused' | 'wide';
 
@@ -290,6 +313,8 @@ export interface ExamSettings {
   shift: 'Forenoon (09:30 IST)' | 'Afternoon (14:30 IST)';
   dailyGoalMinutes: number;
   themeMode: ThemeMode;
+  accentTheme: AccentThemeId;
+  simpleMode: boolean;
   uiScale: UiScaleMode;
   contentWidth: ContentWidthMode;
   pomodoroWorkMinutes: number;
@@ -301,6 +326,43 @@ export interface ExamSettings {
   showLivePaceTimer: boolean;
   enableKeyboardShortcuts: boolean;
   enableMobileSwipeNav?: boolean;
+}
+
+export interface DailyTestRecord {
+  date: string; // YYYY-MM-DD (IST)
+  questionIds: string[];
+  completed: boolean;
+  score: number;
+  maxMarks: number;
+  accuracy: number;
+  attemptedCount: number;
+  correctCount: number;
+  durationSeconds?: number;
+  completedAt?: string;
+  responses?: Record<string, string>;
+}
+
+export interface DailyProgressState {
+  usedDailyDppIds: string[];
+  dailyDppByDate: Record<string, DailyTestRecord>;
+  usedDailyGaIds: string[];
+  dailyGaByDate: Record<string, DailyTestRecord>;
+}
+
+export type RoughWorkPaperStyle = 'dot' | 'grid' | 'blank';
+
+export interface RoughWorkSheet {
+  id: string;
+  name: string;
+  dataUrl: string;
+  paperStyle: RoughWorkPaperStyle;
+  updatedAt: string;
+}
+
+export interface StandaloneRoughWorkState {
+  activeSheetId: string;
+  sheets: RoughWorkSheet[];
+  updatedAt: string;
 }
 
 export type PdfExportLayout = 'worksheet' | 'solutions';
@@ -433,6 +495,7 @@ export interface WarRoomState {
   savedSketches: Record<string, string>; // questionId -> dataURL
   traceTables: Record<string, DryRunTraceTable>; // questionId -> dry-run trace table
   gaStreakLogs: Record<string, GaStreakEntry>; // YYYY-MM-DD -> completed daily GA sprint
+  dailyProgress: DailyProgressState;
   customQuestions: Question[];
   bookmarkedTips: string[];
   customTips: TipItem[];

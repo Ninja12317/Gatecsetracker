@@ -20,6 +20,19 @@ export const MOBILE_BOTTOM_TABS: readonly MobileBottomTabItem[] = [
   { id: 'tips', label: 'Tips', shortLabel: 'Tips' },
 ] as const;
 
+export const SIMPLE_MODE_CORE_TABS: readonly NavView[] = [
+  'dashboard',
+  'syllabus',
+  'pyq',
+  'focus',
+  'mocks',
+] as const;
+
+export function getMobileBottomTabs(simpleMode = false): readonly MobileBottomTabItem[] {
+  if (!simpleMode) return MOBILE_BOTTOM_TABS;
+  return MOBILE_BOTTOM_TABS.filter((t) => SIMPLE_MODE_CORE_TABS.includes(t.id));
+}
+
 export const VIEW_HEADER_TITLES: Record<NavView, string> = {
   dashboard: "GATE '27",
   syllabus: 'Subjects',
@@ -32,8 +45,8 @@ export const VIEW_HEADER_TITLES: Record<NavView, string> = {
   settings: 'Settings',
 };
 
-export function getMobileTabIndex(view: NavView): number {
-  return MOBILE_BOTTOM_TABS.findIndex((t) => t.id === view);
+export function getMobileTabIndex(view: NavView, simpleMode = false): number {
+  return getMobileBottomTabs(simpleMode).findIndex((t) => t.id === view);
 }
 
 /**
@@ -43,13 +56,15 @@ export function getMobileTabIndex(view: NavView): number {
  */
 export function getAdjacentSwipeTab(
   currentView: NavView,
-  direction: 'prev' | 'next'
+  direction: 'prev' | 'next',
+  simpleMode = false
 ): MobileBottomTabItem | null {
-  const idx = getMobileTabIndex(currentView);
+  const tabs = getMobileBottomTabs(simpleMode);
+  const idx = tabs.findIndex((t) => t.id === currentView);
   if (idx === -1) return null;
   const targetIdx = direction === 'next' ? idx + 1 : idx - 1;
-  if (targetIdx < 0 || targetIdx >= MOBILE_BOTTOM_TABS.length) return null;
-  return MOBILE_BOTTOM_TABS[targetIdx];
+  if (targetIdx < 0 || targetIdx >= tabs.length) return null;
+  return tabs[targetIdx];
 }
 
 export interface SwipeGestureInput {
@@ -58,6 +73,7 @@ export interface SwipeGestureInput {
   durationMs: number;
   viewportWidth: number;
   currentView: NavView;
+  simpleMode?: boolean;
 }
 
 export interface SwipeAxisDecision {
@@ -88,14 +104,15 @@ export function classifySwipeAxis(dx: number, dy: number): SwipeAxisDecision {
 export function computeSwipeVisualOffset(
   dx: number,
   currentView: NavView,
-  viewportWidth: number
+  viewportWidth: number,
+  simpleMode = false
 ): { offsetX: number; edgeResist: boolean; peekTab: MobileBottomTabItem | null } {
   const direction: 'prev' | 'next' = dx < 0 ? 'next' : 'prev';
-  const adjacent = getAdjacentSwipeTab(currentView, direction);
+  const adjacent = getAdjacentSwipeTab(currentView, direction, simpleMode);
   const maxTravel = Math.max(120, viewportWidth * 0.42);
 
   if (!adjacent) {
-    // Gentle rubber-band resistance at boundary tabs (Overview left edge / Tips right edge)
+    // Gentle rubber-band resistance at boundary tabs
     const damped = Math.sign(dx) * Math.min(44, Math.pow(Math.abs(dx), 0.72) * 1.4);
     return { offsetX: Math.round(damped * 10) / 10, edgeResist: true, peekTab: null };
   }
@@ -117,7 +134,7 @@ export function evaluateSwipeCommit(input: SwipeGestureInput): {
   targetTab: MobileBottomTabItem | null;
   velocityPxPerMs: number;
 } {
-  const { dx, dy, durationMs, viewportWidth, currentView } = input;
+  const { dx, dy, durationMs, viewportWidth, currentView, simpleMode = false } = input;
   const absX = Math.abs(dx);
   const absY = Math.abs(dy);
   const safeDuration = Math.max(1, durationMs);
@@ -128,7 +145,7 @@ export function evaluateSwipeCommit(input: SwipeGestureInput): {
   }
 
   const direction: 'prev' | 'next' = dx < 0 ? 'next' : 'prev';
-  const targetTab = getAdjacentSwipeTab(currentView, direction);
+  const targetTab = getAdjacentSwipeTab(currentView, direction, simpleMode);
   if (!targetTab) {
     return { shouldCommit: false, targetTab: null, velocityPxPerMs };
   }

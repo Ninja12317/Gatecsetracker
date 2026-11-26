@@ -1,21 +1,26 @@
 import React, { useEffect, useState } from 'react';
+import type { AccentThemeId } from '../types';
 import { SUBJECT_MAP } from '../data/syllabus';
 import { useFocusTimer } from '../context/FocusTimerContext';
 import { computeTimerClock, formatClock } from '../utils/focusAnalytics';
+import { getActiveThemePalette } from '../utils/themeEngine';
 
 interface FocusRadialClockProps {
   size?: 'normal' | 'zen';
+  accentTheme?: AccentThemeId;
+  isDark?: boolean;
 }
 
 /**
  * Isolated React.memo precision SVG circular progress ring + warm ivory monospace countdown.
- * Uses requestAnimationFrame ONLY while running so the Imperial Gold progress arc animates
+ * Uses requestAnimationFrame ONLY while running so the progress arc animates
  * at a silky 60fps without re-rendering Recharts, heatmaps, or any sibling components.
  */
 export const FocusRadialClock: React.FC<FocusRadialClockProps> = React.memo(
-  ({ size = 'normal' }) => {
+  ({ size = 'normal', accentTheme = 'brown', isDark = false }) => {
     const { clockSnapshot, status, subjectId, activePreset, sessionType } = useFocusTimer();
     const [nowMs, setNowMs] = useState<number>(() => Date.now());
+    const palette = getActiveThemePalette(accentTheme, isDark);
 
     useEffect(() => {
       setNowMs(Date.now());
@@ -44,6 +49,8 @@ export const FocusRadialClock: React.FC<FocusRadialClockProps> = React.memo(
         ? Math.max(0.012, Math.min(1, computed.progressRatio))
         : 0;
     const dashOffset = circumference * (1 - visualRatio);
+
+    const ringStroke = activePreset.kind === 'break' ? '#7BB88F' : palette.accentSecondary;
 
     const subj = SUBJECT_MAP[subjectId];
     const statusLabel =
@@ -81,13 +88,13 @@ export const FocusRadialClock: React.FC<FocusRadialClockProps> = React.memo(
               stroke="rgba(245, 240, 232, 0.1)"
               strokeWidth={strokeWidth}
             />
-            {/* Smooth 60fps Imperial Gold progress arc */}
+            {/* Smooth 60fps theme-matched progress arc */}
             <circle
               cx={svgDim / 2}
               cy={svgDim / 2}
               r={radius}
               fill="none"
-              stroke={activePreset.kind === 'break' ? '#7BB88F' : '#C89216'}
+              stroke={ringStroke}
               strokeWidth={strokeWidth}
               strokeLinecap="round"
               strokeDasharray={circumference}
@@ -102,13 +109,11 @@ export const FocusRadialClock: React.FC<FocusRadialClockProps> = React.memo(
           <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6">
             <span className="inline-flex items-center gap-1.5 text-[11px] font-medium tracking-wide uppercase text-[#D6C7B7]">
               <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  status === 'running'
-                    ? activePreset.kind === 'break'
-                      ? 'bg-[#7BB88F] animate-pulse'
-                      : 'bg-[#E0A92E] animate-pulse'
-                    : 'bg-[#8A7768]'
-                }`}
+                className={`h-1.5 w-1.5 rounded-full ${status === 'running' ? 'animate-pulse' : ''}`}
+                style={{
+                  backgroundColor:
+                    status === 'running' ? ringStroke : '#8A7768',
+                }}
               />
               {statusLabel}
             </span>
@@ -123,7 +128,10 @@ export const FocusRadialClock: React.FC<FocusRadialClockProps> = React.memo(
             </div>
 
             <div className="mt-2.5 flex items-center gap-1.5 text-xs text-[#C7B6A5]">
-              <span className="font-mono font-semibold text-[#E0A92E]">
+              <span
+                className="font-mono font-semibold"
+                style={{ color: palette.accentSecondary }}
+              >
                 {activePreset.kind === 'break' ? activePreset.shortLabel : subj?.code ?? 'GATE'}
               </span>
               <span aria-hidden="true" className="text-[#6E5B4E]">
@@ -147,3 +155,4 @@ export const FocusRadialClock: React.FC<FocusRadialClockProps> = React.memo(
 );
 
 FocusRadialClock.displayName = 'FocusRadialClock';
+

@@ -20,8 +20,10 @@ import {
   X,
   Clock,
   Sparkles,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
-import type { AmbientSoundMode, FocusSessionType, StudyLogEntry, SubjectId } from '../types';
+import type { AccentThemeId, AmbientSoundMode, FocusSessionType, StudyLogEntry, SubjectId } from '../types';
 import { GATE_2027_SYLLABUS, SUBJECT_MAP } from '../data/syllabus';
 import { useFocusTimer } from '../context/FocusTimerContext';
 import {
@@ -38,6 +40,8 @@ interface FocusStudioViewProps {
   studyLogs: StudyLogEntry[];
   dailyGoalMinutes: number;
   theme: 'light' | 'dark';
+  accentTheme?: AccentThemeId;
+  simpleMode?: boolean;
   keyboardShortcutsEnabled: boolean;
   onUpdateStudyLog: (
     logId: string,
@@ -57,6 +61,8 @@ export const FocusStudioView: React.FC<FocusStudioViewProps> = ({
   studyLogs,
   dailyGoalMinutes,
   theme,
+  accentTheme = 'brown',
+  simpleMode = false,
   keyboardShortcutsEnabled,
   onUpdateStudyLog,
   onDeleteStudyLog,
@@ -104,6 +110,16 @@ export const FocusStudioView: React.FC<FocusStudioViewProps> = ({
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
   const [editResumeText, setEditResumeText] = useState('');
   const [editGoalText, setEditGoalText] = useState('');
+  const [simpleExpanded, setSimpleExpanded] = useState(false);
+
+  useEffect(() => {
+    if (simpleMode) {
+      setSimpleExpanded(false);
+    }
+  }, [simpleMode]);
+
+  const showSecondaryPanels = !simpleMode || simpleExpanded;
+  const isDark = theme === 'dark';
 
   const todayIso = toLocalIsoDate();
   const todayLogs = useMemo(() => getTodayStudyLogs(studyLogs, todayIso), [studyLogs, todayIso]);
@@ -260,7 +276,7 @@ export const FocusStudioView: React.FC<FocusStudioViewProps> = ({
 
           {/* Isolated 60fps SVG Radial Clock */}
           <div className="py-1">
-            <FocusRadialClock size="normal" />
+            <FocusRadialClock size="normal" accentTheme={accentTheme} isDark={isDark} />
           </div>
 
           {/* Tactile Primary Controls Row */}
@@ -431,10 +447,15 @@ export const FocusStudioView: React.FC<FocusStudioViewProps> = ({
           )}
         </div>
 
-        {/* RIGHT COLUMN (5 cols): Soundscapes + Focus Hygiene + Today's Timeline */}
+        {/* RIGHT COLUMN (5 cols): Today's Timeline (+ Soundscapes & Hygiene when expanded or Full Mode) */}
         <div className="lg:col-span-5 space-y-5">
-          {/* Card 1: Zero-Asset Web Audio Focus Soundscapes & Chimes */}
-          <div className="rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-5 shadow-warm space-y-4">
+          {showSecondaryPanels && (
+            <>
+              {/* Card 1: Zero-Asset Web Audio Focus Soundscapes & Chimes */}
+              <div
+                data-testid="focus-soundscape-card"
+                className="rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-5 shadow-warm space-y-4"
+              >
             <div className="flex items-center justify-between gap-2">
               <div>
                 <h2 className="font-display text-sm font-bold text-[#1C1613] dark:text-[#F5F0E8] flex items-center gap-2">
@@ -667,7 +688,9 @@ export const FocusStudioView: React.FC<FocusStudioViewProps> = ({
                 </div>
               </form>
             )}
-          </div>
+              </div>
+            </>
+          )}
 
           {/* Card 3: Today's Session Timeline (Editable & Deletable, Firestore Synced) */}
           <div className="rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-5 shadow-warm space-y-3.5">
@@ -822,12 +845,40 @@ export const FocusStudioView: React.FC<FocusStudioViewProps> = ({
         </div>
       </section>
 
+      {/* Simple Mode Collapsible Trigger for Soundscapes, Hygiene & 70-Day Analytics */}
+      {simpleMode && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => setSimpleExpanded((v) => !v)}
+            data-testid="focus-simple-expand-btn"
+            aria-expanded={simpleExpanded}
+            className="inline-flex items-center gap-2 h-10 px-5 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] hover:border-[#C89216] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] shadow-warm press-tactile"
+          >
+            {simpleExpanded ? (
+              <>
+                <ChevronUp className="h-4 w-4 text-[#6E261A] dark:text-[#E0A92E]" />
+                Hide Soundscapes, Hygiene &amp; 70-Day Analytics
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-4 w-4 text-[#6E261A] dark:text-[#E0A92E]" />
+                Show Soundscapes, Hygiene &amp; 70-Day Analytics
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
       {/* FULL-WIDTH 70-DAY CONSISTENCY HEATMAP & HIGH-ROI ANALYTICS */}
-      <FocusAnalyticsSection
-        studyLogs={studyLogs}
-        dailyGoalMinutes={dailyGoalMinutes}
-        theme={theme}
-      />
+      {showSecondaryPanels && (
+        <FocusAnalyticsSection
+          studyLogs={studyLogs}
+          dailyGoalMinutes={dailyGoalMinutes}
+          theme={theme}
+          accentTheme={accentTheme}
+        />
+      )}
 
       {/* ZEN FULLSCREEN SANCTUARY OVERLAY ('Z' shortcut or button) */}
       {zenFullscreen && (
@@ -862,7 +913,7 @@ export const FocusStudioView: React.FC<FocusStudioViewProps> = ({
 
           {/* Center Large Radial Clock + Primary Controls */}
           <div className="flex flex-col items-center gap-7">
-            <FocusRadialClock size="zen" />
+            <FocusRadialClock size="zen" accentTheme={accentTheme} isDark={isDark} />
 
             <div className="flex flex-wrap items-center justify-center gap-3">
               <button

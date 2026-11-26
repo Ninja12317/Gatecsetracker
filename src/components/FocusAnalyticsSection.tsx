@@ -11,9 +11,10 @@ import {
   Cell,
 } from 'recharts';
 import { Flame, Clock, Target, SunMedium, BarChart3, CalendarDays } from 'lucide-react';
-import type { StudyLogEntry } from '../types';
+import type { AccentThemeId, StudyLogEntry } from '../types';
 import { SUBJECT_MAP } from '../data/syllabus';
 import { computeStudyStreak, toLocalIsoDate } from '../utils/gateMath';
+import { getActiveThemePalette } from '../utils/themeEngine';
 import {
   build70DayHeatmap,
   buildLast14DaysChartData,
@@ -29,12 +30,14 @@ interface FocusAnalyticsSectionProps {
   studyLogs: StudyLogEntry[];
   dailyGoalMinutes: number;
   theme: 'light' | 'dark';
+  accentTheme?: AccentThemeId;
 }
 
 export const FocusAnalyticsSection: React.FC<FocusAnalyticsSectionProps> = React.memo(
-  ({ studyLogs, dailyGoalMinutes, theme }) => {
+  ({ studyLogs, dailyGoalMinutes, theme, accentTheme = 'brown' }) => {
     const todayIso = toLocalIsoDate();
     const isDark = theme === 'dark';
+    const palette = getActiveThemePalette(accentTheme, isDark);
 
     const heatmapDays = useMemo(() => build70DayHeatmap(studyLogs), [studyLogs]);
     const todayLogs = useMemo(() => getTodayStudyLogs(studyLogs, todayIso), [studyLogs, todayIso]);
@@ -68,20 +71,20 @@ export const FocusAnalyticsSection: React.FC<FocusAnalyticsSectionProps> = React
 
     const activeCell = selectedCell ?? heatmapDays[heatmapDays.length - 1] ?? null;
 
-    // Warm IITM Heatmap Ramp (Zero Blue)
-    const heatColor = (mins: number) => {
-      if (mins <= 0) return 'bg-[#F2ECE2] dark:bg-[#261E1A]';
-      if (mins < 60) return 'bg-[#F3DCA0] dark:bg-[#5C441B]';
-      if (mins < 150) return 'bg-[#D9A126] dark:bg-[#9C6D18]';
-      if (mins < 240) return 'bg-[#9E5322] dark:bg-[#C89216]';
-      return 'bg-[#6E261A] dark:bg-[#E0A92E]';
+    // Live 5-Level Theme-Matched Heatmap Ramp
+    const heatHex = (mins: number) => {
+      if (mins <= 0) return palette.heatmap[0];
+      if (mins < 60) return palette.heatmap[1];
+      if (mins < 150) return palette.heatmap[2];
+      if (mins < 240) return palette.heatmap[3];
+      return palette.heatmap[4];
     };
 
-    const gridStroke = isDark ? '#2E2520' : '#EFE9DF';
-    const axisColor = isDark ? '#A99B8E' : '#61554D';
-    const maroonBar = isDark ? '#B54A38' : '#6E261A';
-    const goldBar = isDark ? '#E0A92E' : '#C89216';
-    const mutedBar = isDark ? '#4B3A31' : '#D9CBB9';
+    const gridStroke = palette.chartGrid;
+    const axisColor = palette.chartAxis;
+    const maroonBar = palette.chartPrimary;
+    const goldBar = palette.chartSecondary;
+    const mutedBar = palette.chartMuted;
 
     return (
       <section className="space-y-5" aria-label="Study Consistency Heatmap and Focus Analytics">
@@ -196,11 +199,14 @@ export const FocusAnalyticsSection: React.FC<FocusAnalyticsSectionProps> = React
 
             <div className="flex items-center gap-1.5 text-[11px] text-[#61554D] dark:text-[#A99B8E]">
               <span>0m</span>
-              <span className="h-3 w-3 rounded-[4px] bg-[#F2ECE2] dark:bg-[#261E1A] border border-[#E8E0D5] dark:border-[#3A2E28]" />
-              <span className="h-3 w-3 rounded-[4px] bg-[#F3DCA0] dark:bg-[#5C441B]" />
-              <span className="h-3 w-3 rounded-[4px] bg-[#D9A126] dark:bg-[#9C6D18]" />
-              <span className="h-3 w-3 rounded-[4px] bg-[#9E5322] dark:bg-[#C89216]" />
-              <span className="h-3 w-3 rounded-[4px] bg-[#6E261A] dark:bg-[#E0A92E]" />
+              {palette.heatmap.map((hex, i) => (
+                <span
+                  key={i}
+                  data-theme-swatch="true"
+                  className={`h-3 w-3 rounded-[4px] ${i === 0 ? 'border border-[#E8E0D5] dark:border-[#3A2E28]' : ''}`}
+                  style={{ backgroundColor: hex }}
+                />
+              ))}
               <span>4h+</span>
             </div>
           </div>
@@ -219,13 +225,13 @@ export const FocusAnalyticsSection: React.FC<FocusAnalyticsSectionProps> = React
                   <button
                     key={cell.date}
                     type="button"
+                    data-theme-swatch="true"
                     onMouseEnter={() => setSelectedCell(cell)}
                     onFocus={() => setSelectedCell(cell)}
                     onClick={() => setSelectedCell(cell)}
                     aria-label={`${cell.date}: ${cell.minutes} minutes, ${cell.sessionCount} sessions, top subject ${topName}`}
-                    className={`aspect-square rounded-[6px] transition-transform duration-150 hover:scale-110 focus:outline-none ${heatColor(
-                      cell.minutes
-                    )} ${
+                    style={{ backgroundColor: heatHex(cell.minutes) }}
+                    className={`aspect-square rounded-[6px] transition-transform duration-150 hover:scale-110 focus:outline-none ${
                       cell.isToday
                         ? 'ring-2 ring-[#6E261A] dark:ring-[#E0A92E] ring-offset-1 ring-offset-[#FAF8F4] dark:ring-offset-[#130F0D]'
                         : isSelected
@@ -300,11 +306,19 @@ export const FocusAnalyticsSection: React.FC<FocusAnalyticsSectionProps> = React
               </div>
               <div className="flex items-center gap-3 text-[11px] text-[#61554D] dark:text-[#A99B8E]">
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 rounded-full bg-[#6E261A] dark:bg-[#B54A38]" />
+                  <span
+                    data-theme-swatch="true"
+                    className="h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: maroonBar }}
+                  />
                   Your Study %
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 rounded-full bg-[#C89216] dark:bg-[#E0A92E]" />
+                  <span
+                    data-theme-swatch="true"
+                    className="h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: goldBar }}
+                  />
                   GATE Marks %
                 </span>
               </div>
@@ -439,13 +453,13 @@ export const FocusAnalyticsSection: React.FC<FocusAnalyticsSectionProps> = React
                   />
                   <ReferenceLine
                     y={goalHours}
-                    stroke="#C89216"
+                    stroke={goldBar}
                     strokeDasharray="5 4"
                     strokeWidth={1.75}
                     label={{
                       value: `Target ${goalHours}h`,
                       position: 'insideTopRight',
-                      fill: isDark ? '#E0A92E' : '#8B6209',
+                      fill: goldBar,
                       fontSize: 10,
                       fontFamily: 'JetBrains Mono, monospace',
                     }}

@@ -14,7 +14,10 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import type {
+  AccentThemeId,
   AuthUserSummary,
+  DailyProgressState,
+  DailyTestRecord,
   DryRunTraceRow,
   DryRunTraceTable,
   ErrorTag,
@@ -29,6 +32,7 @@ import type {
   SrsCardRecord,
   SrsItemType,
   SrsRating,
+  StandaloneRoughWorkState,
   StudyLogEntry,
   SubjectId,
   SubtopicProgress,
@@ -63,6 +67,12 @@ import {
   applyVerifiedAnswer,
   normalizeGateRDataset,
 } from '../utils/gaterNormalizer';
+import {
+  mergeQuestionBanks,
+  questionHasAnswerKey,
+  type ArshanPyqKeyRecord,
+} from '../utils/arshanNormalizer';
+import { deduplicateQuestionPool } from '../utils/testBuilder';
 import { readGateRCache, writeGateRCache } from '../utils/pyqIndexedDb';
 import {
   buildLocalTagTrapsFallback,
@@ -76,10 +86,68 @@ import {
   tipItemToVaultCard,
   vaultCardToTipItem,
 } from '../utils/vaultImporter';
+import {
+  applyThemeToDocument,
+  normalizeAccentThemeId,
+} from '../utils/themeEngine';
+import {
+  createEmptyDailyProgress,
+  recordDailyTestCompletion,
+  selectOrGetDailyDpp,
+  selectOrGetDailyGa,
+} from '../utils/dailyTestEngine';
 
 const STORAGE_KEY = 'gate27_war_room_state_v2';
+const STANDALONE_ROUGH_WORK_KEY = 'standalone_rough_work';
 const SUBJECT_COOLDOWN_MS = 45_000;
 const TRAPS_COOLDOWN_MS = 10_000;
+
+function createDefaultStandaloneRoughWork(): StandaloneRoughWorkState {
+  const nowIso = new Date().toISOString();
+  return {
+    activeSheetId: 'sheet-1',
+    sheets: [
+      {
+        id: 'sheet-1',
+        name: 'Sheet 1',
+        paperStyle: 'dot',
+        dataUrl: '',
+        updatedAt: nowIso,
+      },
+    ],
+    updatedAt: nowIso,
+  };
+}
+
+function loadLocalStandaloneRoughWork(): StandaloneRoughWorkState {
+  try {
+    const raw = localStorage.getItem(STANDALONE_ROUGH_WORK_KEY);
+    if (!raw) return createDefaultStandaloneRoughWork();
+    const parsed = JSON.parse(raw) as Partial<StandaloneRoughWorkState>;
+    if (!Array.isArray(parsed.sheets) || parsed.sheets.length === 0) {
+      return createDefaultStandaloneRoughWork();
+    }
+    const sheets = parsed.sheets.slice(0, 12).map((s, idx) => ({
+      id: typeof s?.id === 'string' && s.id ? s.id : `sheet-${idx + 1}`,
+      name: typeof s?.name === 'string' && s.name ? s.name : `Sheet ${idx + 1}`,
+      paperStyle:
+        s?.paperStyle === 'grid' || s?.paperStyle === 'blank' ? s.paperStyle : ('dot' as const),
+      dataUrl: typeof s?.dataUrl === 'string' ? s.dataUrl : '',
+      updatedAt: typeof s?.updatedAt === 'string' ? s.updatedAt : new Date().toISOString(),
+    }));
+    const activeSheetId =
+      typeof parsed.activeSheetId === 'string' && sheets.some((s) => s.id === parsed.activeSheetId)
+        ? parsed.activeSheetId
+        : sheets[0].id;
+    return {
+      activeSheetId,
+      sheets,
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
+    };
+  } catch {
+    return createDefaultStandaloneRoughWork();
+  }
+}
 
 function sanitizeDocId(raw: string): string {
   const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
@@ -101,6 +169,8 @@ function loadLocalState(): WarRoomState {
         ...initial.settings,
         ...(parsed.settings ?? {}),
         themeMode: parsed.settings?.themeMode ?? resolvedTheme,
+        accentTheme: normalizeAccentThemeId(parsed.settings?.accentTheme),
+        simpleMode: Boolean(parsed.settings?.simpleMode ?? false),
       },
       lastAutopilotIstDate: parsed.lastAutopilotIstDate ?? '',
       lastTrapsIstDate: parsed.lastTrapsIstDate ?? '',
@@ -112,6 +182,18 @@ function loadLocalState(): WarRoomState {
       savedSketches: parsed.savedSketches ?? {},
       traceTables: parsed.traceTables ?? {},
       gaStreakLogs: parsed.gaStreakLogs ?? {},
+      dailyProgress: {
+        ...createEmptyDailyProgress(),
+        ...(parsed.dailyProgress ?? {}),
+        usedDailyDppIds: Array.isArray(parsed.dailyProgress?.usedDailyDppIds)
+          ? parsed.dailyProgress.usedDailyDppIds
+          : [],
+        usedDailyGaIds: Array.isArray(parsed.dailyProgress?.usedDailyGaIds)
+          ? parsed.dailyProgress.usedDailyGaIds
+          : [],
+        dailyDppByDate: parsed.dailyProgress?.dailyDppByDate ?? {},
+        dailyGaByDate: parsed.dailyProgress?.dailyGaByDate ?? {},
+      },
       customQuestions: parsed.customQuestions ?? [],
       bookmarkedTips: parsed.bookmarkedTips ?? [],
       customTips: parsed.customTips ?? [],
@@ -171,11 +253,20 @@ export function useWarRoomStore() {
   const [trapsCooldownUntil, setTrapsCooldownUntil] = useState<number>(0);
   const [trapsNotice, setTrapsNotice] = useState<string>('');
 
-  // GateR full repository IndexedDB-cached PYQ bank
+  // Unified GateR + Arshan IndexedDB-cached PYQ bank
   const [gaterQuestions, setGaterQuestions] = useState<Question[]>([]);
   const [gaterSyncStatus, setGaterSyncStatus] = useState<GateRSyncStatus>('idle');
   const [gaterSyncedAt, setGaterSyncedAt] = useState<string>('');
   const [gaterError, setGaterError] = useState<string>('');
+  const [gaterRawCount, setGaterRawCount] = useState<number>(0);
+  const [arshanCount, setArshanCount] = useState<number>(0);
+  const [enrichedCount, setEnrichedCount] = useState<number>(0);
+  const [syncProgressMsg, setSyncProgressMsg] = useState<string>('');
+
+  // Completely isolated Standalone Rough-Work Scratchpad state (never touches PYQ savedSketches)
+  const [standaloneRoughWork, setStandaloneRoughWork] = useState<StandaloneRoughWorkState>(() =>
+    loadLocalStandaloneRoughWork()
+  );
 
   const stateRef = useRef<WarRoomState>(state);
   stateRef.current = state;
@@ -183,30 +274,22 @@ export function useWarRoomStore() {
   const userRef = useRef<AuthUserSummary | null>(user);
   userRef.current = user;
 
-  // Sync dark/light/system theme mode class on <html>
+  // Sync dark/light/system theme mode AND 8-color accent theme on <html> + zero-flicker boot cache
   useEffect(() => {
-    const root = document.documentElement;
-    const mode = state.settings.themeMode ?? state.theme;
+    const mode: ThemeMode = state.settings.themeMode ?? state.theme;
+    const accent: AccentThemeId = normalizeAccentThemeId(state.settings.accentTheme);
 
-    const applyThemeClass = (isDark: boolean) => {
-      if (isDark) {
-        root.classList.add('dark');
-      } else {
-        root.classList.remove('dark');
-      }
-    };
+    applyThemeToDocument(mode, accent);
 
     if (mode === 'system' && typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
       const mql = window.matchMedia('(prefers-color-scheme: dark)');
-      applyThemeClass(mql.matches);
-      const listener = (e: MediaQueryListEvent) => applyThemeClass(e.matches);
+      const listener = () => applyThemeToDocument('system', accent);
       mql.addEventListener('change', listener);
       return () => mql.removeEventListener('change', listener);
     }
 
-    applyThemeClass(mode === 'dark' || (mode !== 'light' && state.theme === 'dark'));
     return undefined;
-  }, [state.theme, state.settings.themeMode]);
+  }, [state.theme, state.settings.themeMode, state.settings.accentTheme]);
 
   // Sync root UI Scale (90% / 100% / 110%) cleanly on <html>
   useEffect(() => {
@@ -225,46 +308,164 @@ export function useWarRoomStore() {
     }
   }, [state]);
 
-  // Sync full GateR dataset from /api/sync-gater-repo into IndexedDB (zero Firestore quota burn)
-  const syncGateRFromRepo = useCallback(async (forceRefresh = false): Promise<{ ok: boolean; count: number; message: string }> => {
-    setGaterSyncStatus('syncing');
-    setGaterError('');
+  // Persist isolated standalone rough-work scratchpad independently
+  useEffect(() => {
     try {
-      const resp = await fetch(`/api/sync-gater-repo${forceRefresh ? '?force=1' : ''}`);
-      const payload = (await resp.json()) as {
-        ok: boolean;
-        sourceUrl?: string;
-        syncedAt?: string;
-        data?: unknown;
-        message?: string;
-      };
-      if (!payload.ok || !payload.data) {
-        const msg = payload.message || 'Could not sync GateR dataset.';
+      localStorage.setItem(STANDALONE_ROUGH_WORK_KEY, JSON.stringify(standaloneRoughWork));
+    } catch {
+      // ignore localStorage quota errors
+    }
+  }, [standaloneRoughWork]);
+
+  // Sync BOTH GateR (khushit-shah/gater-frontend) AND Arshan (arshanalikhan/gate-cse) into unified IndexedDB cache
+  const syncAllRepos = useCallback(
+    async (
+      forceRefresh = false
+    ): Promise<{
+      ok: boolean;
+      count: number;
+      gaterCount: number;
+      arshanCount: number;
+      enrichedCount: number;
+      verifiedCount: number;
+      message: string;
+    }> => {
+      setGaterSyncStatus('syncing');
+      setGaterError('');
+      setSyncProgressMsg('Syncing GateR & Arshan GitHub banks into IndexedDB...');
+
+      try {
+        const qs = forceRefresh ? '?force=1' : '';
+        const [gaterSettled, arshanSettled] = await Promise.allSettled([
+          fetch(`/api/sync-gater-repo${qs}`).then((r) => r.json()),
+          fetch(`/api/sync-arshan-repo${qs}`).then((r) => r.json()),
+        ]);
+
+        const gaterPayload =
+          gaterSettled.status === 'fulfilled'
+            ? (gaterSettled.value as {
+                ok: boolean;
+                sourceUrl?: string;
+                syncedAt?: string;
+                data?: unknown;
+                message?: string;
+              })
+            : null;
+
+        const arshanPayload =
+          arshanSettled.status === 'fulfilled'
+            ? (arshanSettled.value as {
+                ok: boolean;
+                syncedAt?: string;
+                questions?: Question[];
+                pyqAnswerKeys?: ArshanPyqKeyRecord[];
+                stats?: {
+                  playableCount?: number;
+                  pyqKeysCount?: number;
+                  predicted2027Count?: number;
+                };
+                message?: string;
+              })
+            : null;
+
+        // Retain existing cached GateR items if GateR temporarily failed while Arshan succeeded
+        let gaterNormalized: Question[] = [];
+        if (gaterPayload?.ok && gaterPayload.data) {
+          gaterNormalized = normalizeGateRDataset(gaterPayload.data);
+        } else {
+          const cached = await readGateRCache();
+          if (cached && cached.questions.length > 0) {
+            gaterNormalized = cached.questions.filter((q) => q.isGateR || q.sourceRepo === 'gater' || q.sourceRepo === 'merged');
+          }
+        }
+
+        const arshanQuestions: Question[] =
+          arshanPayload?.ok && Array.isArray(arshanPayload.questions)
+            ? arshanPayload.questions
+            : [];
+        const arshanKeys: ArshanPyqKeyRecord[] =
+          arshanPayload?.ok && Array.isArray(arshanPayload.pyqAnswerKeys)
+            ? arshanPayload.pyqAnswerKeys
+            : [];
+
+        if (gaterNormalized.length === 0 && arshanQuestions.length === 0) {
+          const msg =
+            gaterPayload?.message ||
+            arshanPayload?.message ||
+            'Offline or GitHub unreachable · Serving cached PYQs.';
+          setGaterSyncStatus('error');
+          setGaterError(msg);
+          setSyncProgressMsg('');
+          return {
+            ok: false,
+            count: 0,
+            gaterCount: 0,
+            arshanCount: 0,
+            enrichedCount: 0,
+            verifiedCount: 0,
+            message: msg,
+          };
+        }
+
+        const { questions: mergedQuestions, stats } = mergeQuestionBanks(
+          gaterNormalized,
+          arshanQuestions,
+          arshanKeys
+        );
+
+        const syncedAt = new Date().toISOString();
+        setGaterQuestions(mergedQuestions);
+        setGaterRawCount(stats.gaterCount);
+        setArshanCount(stats.arshanCount);
+        setEnrichedCount(stats.enrichedCount);
+        setGaterSyncedAt(syncedAt);
+        setGaterSyncStatus('synced');
+
+        await writeGateRCache({
+          syncedAt,
+          arshanSyncedAt: arshanPayload?.ok ? arshanPayload.syncedAt || syncedAt : undefined,
+          sourceUrl: 'GateR + arshanalikhan/gate-cse',
+          count: mergedQuestions.length,
+          gaterCount: stats.gaterCount,
+          arshanCount: stats.arshanCount,
+          enrichedCount: stats.enrichedCount,
+          verifiedCount: stats.verifiedCount,
+          questions: mergedQuestions,
+        });
+
+        const msg = `Synced ${mergedQuestions.length.toLocaleString()} Qs (${stats.gaterCount.toLocaleString()} GateR + ${stats.predicted2027Count} Predicted '27 + ${stats.enrichedCount} enriched keys · ${stats.verifiedCount} verified).`;
+        setSyncProgressMsg(msg);
+        return {
+          ok: true,
+          count: mergedQuestions.length,
+          gaterCount: stats.gaterCount,
+          arshanCount: stats.arshanCount,
+          enrichedCount: stats.enrichedCount,
+          verifiedCount: stats.verifiedCount,
+          message: msg,
+        };
+      } catch {
+        const msg = 'Offline or GitHub unreachable · Serving cached PYQs.';
         setGaterSyncStatus('error');
         setGaterError(msg);
-        return { ok: false, count: 0, message: msg };
+        setSyncProgressMsg('');
+        return {
+          ok: false,
+          count: 0,
+          gaterCount: 0,
+          arshanCount: 0,
+          enrichedCount: 0,
+          verifiedCount: 0,
+          message: msg,
+        };
       }
-      const normalized = normalizeGateRDataset(payload.data);
-      const syncedAt = payload.syncedAt || new Date().toISOString();
-      setGaterQuestions(normalized);
-      setGaterSyncedAt(syncedAt);
-      setGaterSyncStatus('synced');
-      await writeGateRCache({
-        syncedAt,
-        sourceUrl: payload.sourceUrl || 'https://github.com/khushit-shah/gater-frontend',
-        count: normalized.length,
-        questions: normalized,
-      });
-      return { ok: true, count: normalized.length, message: `Synced ${normalized.length} PYQs from GitHub.` };
-    } catch {
-      const msg = 'Offline or GitHub unreachable · Serving cached PYQs.';
-      setGaterSyncStatus('error');
-      setGaterError(msg);
-      return { ok: false, count: 0, message: msg };
-    }
-  }, []);
+    },
+    []
+  );
 
-  // Auto-load GateR PYQ bank from IndexedDB (<100ms offline) or auto-sync on first visit
+  const syncGateRFromRepo = syncAllRepos;
+
+  // Auto-load unified GateR + Arshan PYQ bank from IndexedDB (<100ms offline) or sync seamlessly
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -272,16 +473,23 @@ export function useWarRoomStore() {
       if (cancelled) return;
       if (cached && cached.questions.length > 0) {
         setGaterQuestions(cached.questions);
+        setGaterRawCount(cached.gaterCount ?? cached.questions.length);
+        setArshanCount(cached.arshanCount ?? 0);
+        setEnrichedCount(cached.enrichedCount ?? 0);
         setGaterSyncedAt(cached.syncedAt);
         setGaterSyncStatus('synced');
+        // Upgrade legacy GateR-only IndexedDB cache seamlessly in background to include Arshan
+        if (!cached.arshanSyncedAt) {
+          void syncAllRepos(false);
+        }
         return;
       }
-      await syncGateRFromRepo(false);
+      await syncAllRepos(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [syncGateRFromRepo]);
+  }, [syncAllRepos]);
 
   // Build strict Firestore workspace meta payload
   const buildWorkspaceMetaPayload = useCallback((uid: string, s: WarRoomState) => {
@@ -290,6 +498,8 @@ export function useWarRoomStore() {
       ownerId: uid,
       theme: s.theme === 'dark' ? 'dark' : 'light',
       themeMode: mode === 'dark' || mode === 'system' ? mode : 'light',
+      accentTheme: normalizeAccentThemeId(s.settings.accentTheme),
+      simpleMode: Boolean(s.settings.simpleMode ?? false),
       uiScale:
         s.settings.uiScale === 'compact' || s.settings.uiScale === 'comfortable'
           ? s.settings.uiScale
@@ -309,6 +519,7 @@ export function useWarRoomStore() {
       autoAddWrongToMistakes: Boolean(s.settings.autoAddWrongToMistakes ?? true),
       showLivePaceTimer: Boolean(s.settings.showLivePaceTimer ?? true),
       enableKeyboardShortcuts: Boolean(s.settings.enableKeyboardShortcuts ?? true),
+      enableMobileSwipeNav: Boolean(s.settings.enableMobileSwipeNav ?? true),
       lastAutopilotIstDate: (s.lastAutopilotIstDate || '').slice(0, 16),
       lastTrapsIstDate: (s.lastTrapsIstDate || '').slice(0, 16),
       bookmarkedQuestions: s.bookmarkedQuestions.slice(0, 200),
@@ -330,6 +541,46 @@ export function useWarRoomStore() {
     },
     [buildWorkspaceMetaPayload]
   );
+
+  const persistDailyProgress = useCallback(async (nextDaily: DailyProgressState) => {
+    const uid = userRef.current?.uid;
+    if (!uid) return;
+    const path = `users/${uid}/daily_progress/tracker`;
+    try {
+      await setDoc(doc(db, 'users', uid, 'daily_progress', 'tracker'), {
+        ownerId: uid,
+        usedDailyDppIds: nextDaily.usedDailyDppIds.slice(0, 4000),
+        usedDailyGaIds: nextDaily.usedDailyGaIds.slice(0, 1000),
+        dailyDppByDate: nextDaily.dailyDppByDate,
+        dailyGaByDate: nextDaily.dailyGaByDate,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  }, []);
+
+  const persistStandaloneRoughWork = useCallback(async (nextRough: StandaloneRoughWorkState) => {
+    const uid = userRef.current?.uid;
+    if (!uid) return;
+    const path = `users/${uid}/rough_work/main`;
+    try {
+      await setDoc(doc(db, 'users', uid, 'rough_work', 'main'), {
+        ownerId: uid,
+        activeSheetId: nextRough.activeSheetId.slice(0, 64),
+        sheets: nextRough.sheets.slice(0, 12).map((s) => ({
+          id: s.id.slice(0, 64),
+          name: s.name.slice(0, 64),
+          paperStyle: s.paperStyle,
+          dataUrl: s.dataUrl.slice(0, 350000),
+          updatedAt: s.updatedAt.slice(0, 40),
+        })),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  }, []);
 
   const persistPyqQuestion = useCallback(async (uid: string, q: Question) => {
     const docId = sanitizeDocId(q.id);
@@ -581,6 +832,11 @@ export function useWarRoomStore() {
                         ? d.dailyGoalMinutes
                         : prev.settings.dailyGoalMinutes,
                     themeMode: themeModeVal,
+                    accentTheme: normalizeAccentThemeId(d.accentTheme),
+                    simpleMode:
+                      typeof d.simpleMode === 'boolean'
+                        ? d.simpleMode
+                        : prev.settings.simpleMode,
                     uiScale:
                       d.uiScale === 'compact' || d.uiScale === 'comfortable'
                         ? d.uiScale
@@ -618,6 +874,10 @@ export function useWarRoomStore() {
                       typeof d.enableKeyboardShortcuts === 'boolean'
                         ? d.enableKeyboardShortcuts
                         : prev.settings.enableKeyboardShortcuts,
+                    enableMobileSwipeNav:
+                      typeof d.enableMobileSwipeNav === 'boolean'
+                        ? d.enableMobileSwipeNav
+                        : prev.settings.enableMobileSwipeNav,
                   },
                   lastAutopilotIstDate:
                     typeof d.lastAutopilotIstDate === 'string' ? d.lastAutopilotIstDate : '',
@@ -1071,6 +1331,71 @@ export function useWarRoomStore() {
             (err) => handleFirestoreError(err, OperationType.LIST, `users/${uid}/vault_packs`)
           )
         );
+
+        unsubscribes.push(
+          onSnapshot(
+            doc(db, 'users', uid, 'daily_progress', 'tracker'),
+            (snap) => {
+              if (!snap.exists()) return;
+              const d = snap.data();
+              setState((prev) => ({
+                ...prev,
+                dailyProgress: {
+                  usedDailyDppIds: Array.isArray(d.usedDailyDppIds)
+                    ? d.usedDailyDppIds.map(String)
+                    : [],
+                  usedDailyGaIds: Array.isArray(d.usedDailyGaIds)
+                    ? d.usedDailyGaIds.map(String)
+                    : [],
+                  dailyDppByDate:
+                    d.dailyDppByDate && typeof d.dailyDppByDate === 'object'
+                      ? (d.dailyDppByDate as Record<string, DailyTestRecord>)
+                      : {},
+                  dailyGaByDate:
+                    d.dailyGaByDate && typeof d.dailyGaByDate === 'object'
+                      ? (d.dailyGaByDate as Record<string, DailyTestRecord>)
+                      : {},
+                },
+              }));
+            },
+            (err) => handleFirestoreError(err, OperationType.GET, `users/${uid}/daily_progress/tracker`)
+          )
+        );
+
+        unsubscribes.push(
+          onSnapshot(
+            doc(db, 'users', uid, 'rough_work', 'main'),
+            (snap) => {
+              if (!snap.exists()) return;
+              const d = snap.data();
+              if (!Array.isArray(d.sheets) || d.sheets.length === 0) return;
+              const sheets = d.sheets.slice(0, 12).map((s: unknown, idx: number) => {
+                const obj = (s ?? {}) as Record<string, unknown>;
+                return {
+                  id: typeof obj.id === 'string' && obj.id ? obj.id : `sheet-${idx + 1}`,
+                  name: typeof obj.name === 'string' && obj.name ? obj.name : `Sheet ${idx + 1}`,
+                  paperStyle:
+                    obj.paperStyle === 'grid' || obj.paperStyle === 'blank'
+                      ? (obj.paperStyle as 'grid' | 'blank')
+                      : ('dot' as const),
+                  dataUrl: typeof obj.dataUrl === 'string' ? obj.dataUrl : '',
+                  updatedAt:
+                    typeof obj.updatedAt === 'string' ? obj.updatedAt : new Date().toISOString(),
+                };
+              });
+              const activeSheetId =
+                typeof d.activeSheetId === 'string' && sheets.some((s) => s.id === d.activeSheetId)
+                  ? d.activeSheetId
+                  : sheets[0].id;
+              setStandaloneRoughWork({
+                activeSheetId,
+                sheets,
+                updatedAt: new Date().toISOString(),
+              });
+            },
+            (err) => handleFirestoreError(err, OperationType.GET, `users/${uid}/rough_work/main`)
+          )
+        );
       } catch (err) {
         setSyncStatus('error');
         console.error('Firestore bootstrap failed:', err);
@@ -1083,15 +1408,19 @@ export function useWarRoomStore() {
     };
   }, [buildWorkspaceMetaPayload]);
 
-  // Cache-First: IndexedDB GateR 3,161+ PYQs + Firestore custom PYQs + curated baseline, overlaid with verifiedAnswers
+  // Cache-First: Unified IndexedDB GateR + Arshan bank + Firestore custom PYQs + curated baseline, overlaid with verifiedAnswers
   const allQuestions = useMemo(() => {
     const verifiedMap = state.verifiedAnswers;
     const curatedWithKeys = GATE_QUESTION_BANK.map((q) => ({
       ...q,
       hasAnswerKey: true,
+      sourceRepo: q.sourceRepo ?? ('seed' as const),
+      sourceCategory: q.sourceCategory ?? ('PYQ' as const),
     }));
     const customWithKeys = state.customQuestions.map((q) => ({
       ...q,
+      sourceRepo: q.sourceRepo ?? ('custom' as const),
+      sourceCategory: q.sourceCategory ?? ('EXTRA_PRACTICE' as const),
       hasAnswerKey:
         q.hasAnswerKey ??
         Boolean(
@@ -1101,21 +1430,21 @@ export function useWarRoomStore() {
         ),
     }));
 
-    const seenIds = new Set<string>();
     const combined: Question[] = [];
-
-    // Prefer GateR PYQs first so the full 3,161+ official exam bank drives tests, then custom & baseline
     for (const list of [gaterQuestions, customWithKeys, curatedWithKeys]) {
       for (const q of list) {
-        if (seenIds.has(q.id)) continue;
-        seenIds.add(q.id);
         const verified = verifiedMap[q.id];
         combined.push(verified ? applyVerifiedAnswer(q, verified) : q);
       }
     }
 
-    return combined;
+    return deduplicateQuestionPool(combined);
   }, [gaterQuestions, state.customQuestions, state.verifiedAnswers]);
+
+  const verifiedBankCount = useMemo(
+    () => allQuestions.filter((q) => questionHasAnswerKey(q)).length,
+    [allQuestions]
+  );
 
   // Unified Vault Cards: Imported/GitHub Packs + Mined Mistakes (₹0) + Legacy Custom/Traps + 132-Card Master Bundle
   const allVaultCards = useMemo<VaultCard[]>(() => {
@@ -1231,6 +1560,45 @@ export function useWarRoomStore() {
       void persistWorkspaceMeta(next);
     },
     [persistWorkspaceMeta]
+  );
+
+  const setAccentTheme = useCallback(
+    (accent: AccentThemeId) => {
+      const safe = normalizeAccentThemeId(accent);
+      const next: WarRoomState = {
+        ...stateRef.current,
+        settings: {
+          ...stateRef.current.settings,
+          accentTheme: safe,
+        },
+      };
+      setState(next);
+      void persistWorkspaceMeta(next);
+    },
+    [persistWorkspaceMeta]
+  );
+
+  const setSimpleMode = useCallback(
+    (enabled: boolean) => {
+      const next: WarRoomState = {
+        ...stateRef.current,
+        settings: {
+          ...stateRef.current.settings,
+          simpleMode: Boolean(enabled),
+        },
+      };
+      setState(next);
+      void persistWorkspaceMeta(next);
+    },
+    [persistWorkspaceMeta]
+  );
+
+  const saveStandaloneRoughWork = useCallback(
+    (nextRough: StandaloneRoughWorkState) => {
+      setStandaloneRoughWork(nextRough);
+      void persistStandaloneRoughWork(nextRough);
+    },
+    [persistStandaloneRoughWork]
   );
 
   const writeSubtopicProgress = useCallback(async (subtopicId: string, entry: SubtopicProgress) => {
@@ -2588,6 +2956,132 @@ export function useWarRoomStore() {
     }
   }, []);
 
+  const getOrCreateTodayDailyDpp = useCallback((): {
+    todayIst: string;
+    record: DailyTestRecord;
+    questions: Question[];
+    rolledOverPool: boolean;
+  } => {
+    const todayIst = getIstDateString();
+    const cur = stateRef.current;
+    const res = selectOrGetDailyDpp({
+      todayIst,
+      allQuestions,
+      dailyProgress: cur.dailyProgress,
+      syllabus: GATE_2027_SYLLABUS,
+      progress: cur.progress,
+      attempts: cur.attempts,
+      hideRemoved2027: cur.settings.autoHideRemoved2027 ?? true,
+      count: 10,
+    });
+
+    if (res.updatedProgress !== cur.dailyProgress) {
+      setState((prev) => ({ ...prev, dailyProgress: res.updatedProgress }));
+      void persistDailyProgress(res.updatedProgress);
+    }
+
+    return {
+      todayIst,
+      record: res.record,
+      questions: res.questions,
+      rolledOverPool: res.rolledOverPool,
+    };
+  }, [allQuestions, persistDailyProgress]);
+
+  const completeTodayDailyDpp = useCallback(
+    (payload: {
+      dateIst?: string;
+      questionIds: string[];
+      score: number;
+      maxMarks: number;
+      accuracy: number;
+      attemptedCount: number;
+      correctCount: number;
+      durationSeconds?: number;
+      responses?: Record<string, string>;
+    }) => {
+      const todayIst = payload.dateIst || getIstDateString();
+      const updated = recordDailyTestCompletion({
+        kind: 'dpp',
+        todayIst,
+        dailyProgress: stateRef.current.dailyProgress,
+        questionIds: payload.questionIds,
+        score: payload.score,
+        maxMarks: payload.maxMarks,
+        accuracy: payload.accuracy,
+        attemptedCount: payload.attemptedCount,
+        correctCount: payload.correctCount,
+        durationSeconds: payload.durationSeconds,
+        responses: payload.responses,
+      });
+      setState((prev) => ({ ...prev, dailyProgress: updated }));
+      void persistDailyProgress(updated);
+    },
+    [persistDailyProgress]
+  );
+
+  const getOrCreateTodayDailyGa = useCallback((): {
+    todayIst: string;
+    record: DailyTestRecord;
+    questions: Question[];
+    rolledOverPool: boolean;
+  } => {
+    const todayIst = getIstDateString();
+    const cur = stateRef.current;
+    const res = selectOrGetDailyGa({
+      todayIst,
+      allQuestions,
+      dailyProgress: cur.dailyProgress,
+      attempts: cur.attempts,
+      hideRemoved2027: cur.settings.autoHideRemoved2027 ?? true,
+      count: 5,
+    });
+
+    if (res.updatedProgress !== cur.dailyProgress) {
+      setState((prev) => ({ ...prev, dailyProgress: res.updatedProgress }));
+      void persistDailyProgress(res.updatedProgress);
+    }
+
+    return {
+      todayIst,
+      record: res.record,
+      questions: res.questions,
+      rolledOverPool: res.rolledOverPool,
+    };
+  }, [allQuestions, persistDailyProgress]);
+
+  const completeTodayDailyGa = useCallback(
+    (payload: {
+      dateIst?: string;
+      questionIds: string[];
+      score: number;
+      maxMarks: number;
+      accuracy: number;
+      attemptedCount: number;
+      correctCount: number;
+      durationSeconds?: number;
+      responses?: Record<string, string>;
+    }) => {
+      const todayIst = payload.dateIst || getIstDateString();
+      const updated = recordDailyTestCompletion({
+        kind: 'ga',
+        todayIst,
+        dailyProgress: stateRef.current.dailyProgress,
+        questionIds: payload.questionIds,
+        score: payload.score,
+        maxMarks: payload.maxMarks,
+        accuracy: payload.accuracy,
+        attemptedCount: payload.attemptedCount,
+        correctCount: payload.correctCount,
+        durationSeconds: payload.durationSeconds,
+        responses: payload.responses,
+      });
+      setState((prev) => ({ ...prev, dailyProgress: updated }));
+      void persistDailyProgress(updated);
+    },
+    [persistDailyProgress]
+  );
+
   const updateSettings = useCallback(
     (patch: Partial<ExamSettings>) => {
       const nextState: WarRoomState = {
@@ -2921,7 +3415,11 @@ export function useWarRoomStore() {
     trapsCooldownUntil,
     trapsNotice,
     gaterSyncStatus,
-    gaterCount: gaterQuestions.length,
+    gaterCount: gaterRawCount || gaterQuestions.length,
+    arshanCount,
+    enrichedCount,
+    verifiedBankCount,
+    syncProgressMsg,
     gaterSyncedAt,
     gaterError,
     allQuestions,
@@ -2930,6 +3428,7 @@ export function useWarRoomStore() {
     signInWithGoogle: handleSignInGoogle,
     signOut: handleSignOut,
     syncGateRFromRepo,
+    syncAllRepos,
     saveVerifiedAnswer,
     verifySinglePyqWithAi,
     runDailyAutopilot,
@@ -2940,6 +3439,14 @@ export function useWarRoomStore() {
     recordSrsRating,
     toggleTheme,
     setThemeMode,
+    setAccentTheme,
+    setSimpleMode,
+    standaloneRoughWork,
+    saveStandaloneRoughWork,
+    getOrCreateTodayDailyDpp,
+    completeTodayDailyDpp,
+    getOrCreateTodayDailyGa,
+    completeTodayDailyGa,
     cycleSubtopicStatus,
     setSubtopicConfidence,
     markSubtopicRevised,

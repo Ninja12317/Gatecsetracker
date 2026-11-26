@@ -22,8 +22,11 @@ import {
   Wifi,
   WifiOff,
   CheckCircle2,
+  Palette,
+  EyeOff,
 } from 'lucide-react';
 import type {
+  AccentThemeId,
   AuthUserSummary,
   ContentWidthMode,
   ExamSettings,
@@ -40,6 +43,7 @@ import {
   playTimerCompletionChime,
 } from '../utils/examPolish';
 import { getGateRCacheSizeBytes } from '../utils/pyqIndexedDb';
+import { ACCENT_THEMES, normalizeAccentThemeId } from '../utils/themeEngine';
 
 interface SettingsViewProps {
   state: WarRoomState;
@@ -52,6 +56,8 @@ interface SettingsViewProps {
   onSignInGoogle: () => void;
   onSignOut: () => void;
   onSetThemeMode: (mode: ThemeMode) => void;
+  onSetAccentTheme: (accent: AccentThemeId) => void;
+  onToggleSimpleMode: (enabled: boolean) => void;
   onUpdateSettings: (patch: Partial<ExamSettings>) => void;
   onImportBackup: (imported: Partial<WarRoomState>) => void;
   onResetAll: () => void;
@@ -77,6 +83,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onSignInGoogle,
   onSignOut,
   onSetThemeMode,
+  onSetAccentTheme,
+  onToggleSimpleMode,
   onUpdateSettings,
   onImportBackup,
   onResetAll,
@@ -213,6 +221,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   ];
 
   const currentThemeMode: ThemeMode = state.settings.themeMode ?? state.theme;
+  const currentAccent: AccentThemeId = normalizeAccentThemeId(state.settings.accentTheme);
+  const isSimpleMode = Boolean(state.settings.simpleMode);
   const currentScale: UiScaleMode = state.settings.uiScale ?? 'default';
   const currentWidth: ContentWidthMode = state.settings.contentWidth ?? 'focused';
 
@@ -520,8 +530,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="grid grid-cols-3 gap-2.5">
               {(
                 [
-                  { id: 'light' as const, label: 'Light (IITM Ivory)', icon: Sun },
-                  { id: 'dark' as const, label: 'Dark (Warm Espresso)', icon: Moon },
+                  { id: 'light' as const, label: 'Light Mode', icon: Sun },
+                  { id: 'dark' as const, label: 'Dark Mode', icon: Moon },
                   { id: 'system' as const, label: 'System Auto', icon: Laptop },
                 ] as const
               ).map((m) => {
@@ -545,6 +555,120 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          {/* 8 Curated Color Themes */}
+          <div className="space-y-3 pt-4 border-t border-[#EFE9DF] dark:border-[#2E2520]">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8] flex items-center gap-2">
+                  <Palette className="w-4 h-4 text-[#6E261A] dark:text-[#E0A92E]" />
+                  Color Theme (8 Curated Palettes)
+                </h2>
+                <p className="text-xs text-[#61554D] dark:text-[#A99B8E] mt-0.5">
+                  Re-themes the entire workspace, Focus clock, charts, and 70-day heatmap in real time with zero reload flicker.
+                </p>
+              </div>
+            </div>
+            <div
+              data-testid="settings-color-theme-grid"
+              className="grid grid-cols-2 lg:grid-cols-4 gap-2.5"
+            >
+              {ACCENT_THEMES.map((t) => {
+                const active = currentAccent === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    data-testid={`settings-accent-${t.id}`}
+                    aria-pressed={active}
+                    onClick={() => {
+                      onSetAccentTheme(t.id);
+                      showSaved(`Color theme switched to ${t.name}.`);
+                    }}
+                    className={`squircle rounded-[20px] p-3 border text-left transition-all press-tactile flex flex-col gap-2 ${
+                      active
+                        ? 'bg-[#FDF6E3] dark:bg-[#2C2215] border-[#C89216] dark:border-[#E0A92E] shadow-xs'
+                        : 'bg-[#FAF8F4] dark:bg-[#241D19] border-[#E8E0D5] dark:border-[#2E2520] hover:border-[#C89216]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        data-theme-swatch="true"
+                        style={{
+                          background: `linear-gradient(135deg, ${t.swatchPrimary} 50%, ${t.swatchSecondary} 50%)`,
+                        }}
+                        className="w-8 h-8 rounded-full border border-black/10 dark:border-white/15 shadow-xs flex items-center justify-center shrink-0"
+                      >
+                        {active && <Check className="w-3.5 h-3.5 text-white drop-shadow" strokeWidth={3} />}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        {t.light.heatmap.slice(1).map((hex, i) => (
+                          <span
+                            key={i}
+                            data-theme-swatch="true"
+                            style={{ backgroundColor: hex }}
+                            className="w-2.5 h-2.5 rounded-[4px]"
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-[#1C1613] dark:text-[#F5F0E8] leading-tight truncate">
+                        {t.name}
+                      </p>
+                      <p className="text-[10px] text-[#61554D] dark:text-[#A99B8E] mt-0.5 line-clamp-1">
+                        {t.tagline}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Simple Mode (Distraction-Free Essential View) */}
+          <div className="space-y-2.5 pt-4 border-t border-[#EFE9DF] dark:border-[#2E2520]">
+            <div>
+              <h2 className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8] flex items-center gap-2">
+                <EyeOff className="w-4 h-4 text-[#6E261A] dark:text-[#E0A92E]" />
+                Simple Mode (Distraction-Free View)
+              </h2>
+              <p className="text-xs text-[#61554D] dark:text-[#A99B8E]">
+                Hide secondary tabs and extra widgets to focus strictly on Overview, Subjects, PYQ Studio, Focus, and Mocks. Your data stays 100% intact.
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-4 rounded-[20px] bg-[#FAF8F4] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520] px-4 py-3.5">
+              <div>
+                <p className="text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8]">
+                  Enable Simple Mode
+                </p>
+                <p className="text-[11px] text-[#61554D] dark:text-[#A99B8E] mt-0.5">
+                  Keeps only the 5 core daily study tabs, simplifies Overview &amp; Focus panels, and tucks bulk importers into a compact menu. Switch back anytime.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                data-testid="settings-simple-mode-toggle"
+                aria-checked={isSimpleMode}
+                onClick={() => {
+                  onToggleSimpleMode(!isSimpleMode);
+                  showSaved(`Simple Mode ${!isSimpleMode ? 'enabled' : 'disabled'}.`);
+                }}
+                className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors ${
+                  isSimpleMode
+                    ? 'bg-[#6E261A] dark:bg-[#E0A92E]'
+                    : 'bg-[#D8CBB8] dark:bg-[#3A2E28]'
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transform transition-transform mt-0.5 ${
+                    isSimpleMode ? 'translate-x-5' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
             </div>
           </div>
 

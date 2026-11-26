@@ -12,6 +12,7 @@ import { VIEW_HEADER_TITLES } from '../utils/mobileNav';
 interface TopBarProps {
   activeView: NavView;
   contentWidth: ContentWidthMode;
+  simpleMode?: boolean;
   user: AuthUserSummary | null;
   syncStatus: SyncStatus;
   quotaNotice: string;
@@ -26,20 +27,21 @@ interface TopBarProps {
   onOpenDrawer: () => void;
 }
 
-const PRIMARY_NAV: Array<{ id: NavView; label: string }> = [
-  { id: 'dashboard', label: 'Overview' },
-  { id: 'focus', label: 'Focus' },
-  { id: 'syllabus', label: 'Subjects' },
-  { id: 'pyq', label: 'PYQ Studio' },
+const PRIMARY_NAV: Array<{ id: NavView; label: string; core?: boolean }> = [
+  { id: 'dashboard', label: 'Overview', core: true },
+  { id: 'syllabus', label: 'Subjects', core: true },
+  { id: 'pyq', label: 'PYQ Studio', core: true },
+  { id: 'focus', label: 'Focus', core: true },
+  { id: 'mocks', label: 'Mocks', core: true },
   { id: 'cslab', label: 'CS Lab' },
   { id: 'revision', label: 'Revision' },
   { id: 'tips', label: 'Daily Tips' },
-  { id: 'mocks', label: 'Mocks' },
 ];
 
 export const TopBar: React.FC<TopBarProps> = ({
   activeView,
   contentWidth,
+  simpleMode = false,
   user,
   syncStatus,
   quotaNotice,
@@ -53,6 +55,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenCommandPalette,
   onOpenDrawer,
 }) => {
+  const visibleNav = simpleMode ? PRIMARY_NAV.filter((n) => n.core) : PRIMARY_NAV;
   const { status: focusStatus } = useFocusTimer();
   const isFocusRunning = focusStatus === 'running';
 
@@ -84,7 +87,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   useLayoutEffect(() => {
     measureActivePill();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView, unresolvedMistakesCount, revisionDueCount, contentWidth, isFocusRunning]);
+  }, [activeView, unresolvedMistakesCount, revisionDueCount, contentWidth, isFocusRunning, simpleMode]);
 
   useEffect(() => {
     const onResize = () => measureActivePill();
@@ -194,7 +197,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             }}
           />
 
-          {PRIMARY_NAV.map((item) => {
+          {visibleNav.map((item) => {
             const isActive = activeView === item.id;
             const badgeCount =
               item.id === 'syllabus'

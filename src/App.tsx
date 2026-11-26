@@ -10,12 +10,14 @@ import {
 import { isSrsCardDueToday, makeSrsCardId } from './utils/examPolish';
 import { matchPyqsForVaultCard } from './utils/vaultImporter';
 import {
+  SIMPLE_MODE_CORE_TABS,
   VIEW_HEADER_TITLES,
   popHistoryEntry,
   pushHistoryEntry,
   shouldShowContextualBack,
   type NavHistoryEntry,
 } from './utils/mobileNav';
+import { normalizeAccentThemeId } from './utils/themeEngine';
 import { GATE_2027_SYLLABUS, SUBJECT_MAP } from './data/syllabus';
 import { TopBar } from './components/TopBar';
 import { MobileBottomNav } from './components/MobileBottomNav';
@@ -31,6 +33,7 @@ import { TipsVaultView } from './components/TipsVaultView';
 import { MockAnalyticsView } from './components/MockAnalyticsView';
 import { SettingsView } from './components/SettingsView';
 import { CalculatorDrawer } from './components/CalculatorDrawer';
+import { StandaloneSketchpadModal } from './components/StandaloneSketchpadModal';
 import { CommandPalette } from './components/CommandPalette';
 import { InfoModal } from './components/InfoModal';
 import { PdfExportModal } from './components/PdfExportModal';
@@ -69,6 +72,7 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [zenMode, setZenMode] = useState(false);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
+  const [standaloneSketchpadOpen, setStandaloneSketchpadOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [infoModalOpen, setInfoModalOpen] = useState(false);
   const [pdfModalRequest, setPdfModalRequest] = useState<PdfExportRequest | null>(null);
@@ -76,7 +80,9 @@ export default function App() {
   const [pdfToast, setPdfToast] = useState<string>('');
   const [focusedSubjectId, setFocusedSubjectId] = useState<SubjectId | null>(null);
   const [autoStartDppTrigger, setAutoStartDppTrigger] = useState(0);
+  const [autoReviewDppTrigger, setAutoReviewDppTrigger] = useState(0);
   const [autoStartGaSprintTrigger, setAutoStartGaSprintTrigger] = useState(0);
+  const [autoReviewGaTrigger, setAutoReviewGaTrigger] = useState(0);
   const [openMistakesTrigger, setOpenMistakesTrigger] = useState(0);
   const [launchSketchpadSprintTrigger, setLaunchSketchpadSprintTrigger] = useState(0);
   const [exitPyqSessionTrigger, setExitPyqSessionTrigger] = useState(0);
@@ -184,6 +190,7 @@ export default function App() {
         setInfoModalOpen(false);
         setDrawerOpen(false);
         setPdfModalRequest(null);
+        setStandaloneSketchpadOpen(false);
         return;
       }
       if (!shortcutsEnabled) return;
@@ -280,15 +287,34 @@ export default function App() {
     setAutoStartDppTrigger((n) => n + 1);
   }, [navigateTo]);
 
+  const handleReviewDailyDpp = useCallback(() => {
+    navigateTo('pyq', { subContext: 'pyq:dpp-review', label: 'Daily DPP Review' });
+    setAutoReviewDppTrigger((n) => n + 1);
+  }, [navigateTo]);
+
   const handleLaunchGaSprint = useCallback(() => {
-    navigateTo('pyq', { subContext: 'pyq:ga', label: 'Daily GA Sprint' });
+    navigateTo('pyq', { subContext: 'pyq:ga', label: 'Daily GA Test' });
     setAutoStartGaSprintTrigger((n) => n + 1);
   }, [navigateTo]);
 
-  const handleLaunchSketchpadSprint = useCallback(() => {
-    navigateTo('pyq', { subContext: 'pyq:sketch', label: 'Rough-Work Sprint' });
-    setLaunchSketchpadSprintTrigger((n) => n + 1);
+  const handleReviewGaSprint = useCallback(() => {
+    navigateTo('pyq', { subContext: 'pyq:ga-review', label: 'Daily GA Review' });
+    setAutoReviewGaTrigger((n) => n + 1);
   }, [navigateTo]);
+
+  const handleToggleSimpleMode = useCallback(
+    (enabled: boolean) => {
+      store.setSimpleMode(enabled);
+      if (
+        enabled &&
+        activeView !== 'settings' &&
+        !(SIMPLE_MODE_CORE_TABS as readonly NavView[]).includes(activeView)
+      ) {
+        navigateTo('dashboard');
+      }
+    },
+    [store, activeView, navigateTo]
+  );
 
   const handleOpenMistakesBucket = useCallback(() => {
     navigateTo('pyq', { subContext: 'pyq:mistakes', label: 'Mistake Bucket' });
@@ -410,6 +436,10 @@ export default function App() {
         setInfoModalOpen(false);
         return;
       }
+      if (standaloneSketchpadOpen) {
+        setStandaloneSketchpadOpen(false);
+        return;
+      }
       if (pdfModalRequest) {
         setPdfModalRequest(null);
         return;
@@ -426,6 +456,7 @@ export default function App() {
     pyqSessionInfo,
     drawerOpen,
     calculatorOpen,
+    standaloneSketchpadOpen,
     commandPaletteOpen,
     infoModalOpen,
     pdfModalRequest,
@@ -446,6 +477,8 @@ export default function App() {
     });
   }, []);
 
+  const simpleMode = Boolean(store.state.settings.simpleMode);
+  const accentTheme = normalizeAccentThemeId(store.state.settings.accentTheme);
   const contentWidth = store.state.settings.contentWidth ?? 'standard';
   const containerMaxWidth = contentWidth === 'wide' ? 'max-w-[1536px]' : 'max-w-[1280px]';
   const hideChrome = zenMode && activeView === 'pyq';
@@ -454,6 +487,17 @@ export default function App() {
     Boolean(focusedSubjectId) ||
     (activeView === 'pyq' && (pyqSessionInfo.active || pyqSessionInfo.studioTab !== 'practice'));
   const showContextualBack = shouldShowContextualBack(activeView, hasNestedView);
+
+  // If Simple Mode syncs ON from Firestore while on a hidden secondary tab, cleanly return to Overview
+  useEffect(() => {
+    if (
+      simpleMode &&
+      activeView !== 'settings' &&
+      !(SIMPLE_MODE_CORE_TABS as readonly NavView[]).includes(activeView)
+    ) {
+      setActiveView('dashboard');
+    }
+  }, [simpleMode, activeView]);
 
   const mobileHeaderTitle = useMemo(() => {
     if (activeView === 'pyq') {
@@ -473,6 +517,7 @@ export default function App() {
   const anyModalOrOverlayOpen =
     drawerOpen ||
     calculatorOpen ||
+    standaloneSketchpadOpen ||
     commandPaletteOpen ||
     infoModalOpen ||
     Boolean(pdfModalRequest) ||
@@ -483,6 +528,7 @@ export default function App() {
     activeView,
     enabled: store.state.settings.enableMobileSwipeNav ?? true,
     disabled: hideChrome || isActivePyqTest || pyqSessionInfo.sketchpadOpen || anyModalOrOverlayOpen,
+    simpleMode,
     onSelectTab: (nextView) => navigateTo(nextView),
   });
 
@@ -506,6 +552,7 @@ export default function App() {
           <TopBar
             activeView={activeView}
             contentWidth={contentWidth}
+            simpleMode={simpleMode}
             user={store.user}
             syncStatus={store.syncStatus}
             quotaNotice={store.quotaNotice}
@@ -560,7 +607,7 @@ export default function App() {
               syncStatus={store.syncStatus}
               allTips={store.allTips}
               totalPyqCount={store.allQuestions.length}
-              unresolvedMistakesCount={unresolvedMistakesCount}
+              simpleMode={simpleMode}
               autopilotLoading={store.autopilotLoading}
               autopilotStatusMsg={store.autopilotStatusMsg}
               urlIngestLoading={store.urlIngestLoading}
@@ -569,12 +616,11 @@ export default function App() {
               onNavigate={(v) => navigateTo(v)}
               onJumpToSubject={handleJumpToSubject}
               onLaunchDailyDpp={handleLaunchDailyDpp}
+              onReviewDailyDpp={handleReviewDailyDpp}
               onLaunchGaSprint={handleLaunchGaSprint}
-              onLaunchSketchpadSprint={handleLaunchSketchpadSprint}
-              onOpenMistakesBucket={handleOpenMistakesBucket}
-              onToggleCalculator={() => setCalculatorOpen((o) => !o)}
+              onReviewGaSprint={handleReviewGaSprint}
+              onOpenStandaloneSketchpad={() => setStandaloneSketchpadOpen(true)}
               onOpenCommandPalette={() => setCommandPaletteOpen(true)}
-              onResetAll={store.resetAllData}
             />
           )}
 
@@ -583,6 +629,8 @@ export default function App() {
               studyLogs={store.state.studyLogs}
               dailyGoalMinutes={store.state.settings.dailyGoalMinutes}
               theme={store.state.theme}
+              accentTheme={accentTheme}
+              simpleMode={simpleMode}
               keyboardShortcutsEnabled={store.state.settings.enableKeyboardShortcuts ?? true}
               onUpdateStudyLog={store.updateStudyLog}
               onDeleteStudyLog={store.deleteStudyLog}
@@ -605,19 +653,31 @@ export default function App() {
             <PyqStudioView
               state={store.state}
               allQuestions={store.allQuestions}
+              simpleMode={simpleMode}
               autoStartDppTrigger={autoStartDppTrigger}
+              autoReviewDppTrigger={autoReviewDppTrigger}
               autoStartGaSprintTrigger={autoStartGaSprintTrigger}
+              autoReviewGaTrigger={autoReviewGaTrigger}
               openMistakesTrigger={openMistakesTrigger}
               launchSketchpadSprintTrigger={launchSketchpadSprintTrigger}
+              onGetOrCreateTodayDailyDpp={store.getOrCreateTodayDailyDpp}
+              onCompleteDailyDpp={store.completeTodayDailyDpp}
+              onGetOrCreateTodayDailyGa={store.getOrCreateTodayDailyGa}
+              onCompleteDailyGa={store.completeTodayDailyGa}
               gaterSyncStatus={store.gaterSyncStatus}
               gaterCount={store.gaterCount}
+              arshanCount={store.arshanCount}
+              enrichedCount={store.enrichedCount}
+              verifiedBankCount={store.verifiedBankCount}
+              syncProgressMsg={store.syncProgressMsg}
               gaterSyncedAt={store.gaterSyncedAt}
               gaterError={store.gaterError}
               subjectFetching={store.subjectFetching}
               subjectCooldownUntil={store.subjectCooldownUntil}
               urlIngestLoading={store.urlIngestLoading}
               quotaNotice={store.quotaNotice}
-              onResyncGateR={() => store.syncGateRFromRepo(true)}
+              onResyncGateR={() => store.syncAllRepos(true)}
+              onNotify={handlePdfDownloadSuccess}
               onSaveVerifiedAnswer={store.saveVerifiedAnswer}
               onVerifySinglePyq={store.verifySinglePyqWithAi}
               onFetchSubjectPyqs={store.fetchMoreSubjectPyqs}
@@ -684,6 +744,7 @@ export default function App() {
               mocks={store.state.mocks}
               progress={store.state.progress}
               theme={store.state.theme}
+              accentTheme={accentTheme}
               onAddMock={store.addMockTest}
               onDeleteMock={store.deleteMockTest}
               onExportMockPdf={handleExportMockReportPdf}
@@ -702,6 +763,8 @@ export default function App() {
               onSignInGoogle={store.signInWithGoogle}
               onSignOut={store.signOut}
               onSetThemeMode={store.setThemeMode}
+              onSetAccentTheme={store.setAccentTheme}
+              onToggleSimpleMode={handleToggleSimpleMode}
               onUpdateSettings={store.updateSettings}
               onImportBackup={store.importFullBackup}
               onResetAll={store.resetAllData}
@@ -760,6 +823,7 @@ export default function App() {
         <MobileBottomNav
           activeView={activeView}
           hidden={hideMobileBottomNav}
+          simpleMode={simpleMode}
           onSelectView={(v) => navigateTo(v)}
         />
 
@@ -825,6 +889,10 @@ export default function App() {
           onOpenPalette={() => setCommandPaletteOpen(true)}
           theme={store.state.theme}
           onSetLightDark={(mode) => store.setThemeMode(mode)}
+          accentTheme={accentTheme}
+          onSetAccentTheme={store.setAccentTheme}
+          simpleMode={simpleMode}
+          onToggleSimpleMode={handleToggleSimpleMode}
           user={store.user}
           syncStatus={store.syncStatus}
           onSignIn={store.signInWithGoogle}
@@ -837,6 +905,15 @@ export default function App() {
           pwaInstalled={pwa.isInstalled}
           pwaCanPrompt={pwa.canPromptNatively}
           onTriggerPwaInstall={() => void pwa.triggerInstall()}
+        />
+
+        <StandaloneSketchpadModal
+          isOpen={standaloneSketchpadOpen}
+          onClose={() => setStandaloneSketchpadOpen(false)}
+          roughWork={store.standaloneRoughWork}
+          onSaveRoughWork={store.saveStandaloneRoughWork}
+          accentTheme={accentTheme}
+          isDark={store.state.theme === 'dark'}
         />
 
         <CalculatorDrawer

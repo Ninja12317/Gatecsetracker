@@ -9,12 +9,13 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { NavView } from '../types';
-import { MOBILE_BOTTOM_TABS } from '../utils/mobileNav';
+import { getMobileBottomTabs } from '../utils/mobileNav';
 import { useFocusTimer } from '../context/FocusTimerContext';
 
 interface MobileBottomNavProps {
   activeView: NavView;
   hidden?: boolean;
+  simpleMode?: boolean;
   onSelectView: (view: NavView) => void;
 }
 
@@ -36,11 +37,13 @@ const TAB_ICONS: Partial<Record<NavView, React.ComponentType<{ className?: strin
 export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   activeView,
   hidden = false,
+  simpleMode = false,
   onSelectView,
 }) => {
   const { status: focusStatus } = useFocusTimer();
   const isFocusRunning = focusStatus === 'running';
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const tabs = getMobileBottomTabs(simpleMode);
 
   useEffect(() => {
     if (hidden) return;
@@ -72,7 +75,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           data-no-swipe="true"
           className="flex flex-nowrap items-center gap-1 overflow-x-auto no-scrollbar snap-x snap-mandatory"
         >
-          {MOBILE_BOTTOM_TABS.map((tab) => {
+          {tabs.map((tab) => {
             const Icon = TAB_ICONS[tab.id] ?? LayoutDashboard;
             const isActive = activeView === tab.id;
             const showFocusPulse = tab.id === 'focus' && isFocusRunning;

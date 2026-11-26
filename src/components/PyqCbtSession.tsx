@@ -63,6 +63,20 @@ export interface ActiveCbtSession {
   visited: Record<string, boolean>;
   finished: boolean;
   isGaSprint?: boolean;
+  dailyKind?: 'dpp' | 'ga';
+  dailyDateIst?: string;
+}
+
+interface DailyCompletionPayload {
+  dateIst?: string;
+  questionIds: string[];
+  score: number;
+  maxMarks: number;
+  accuracy: number;
+  attemptedCount: number;
+  correctCount: number;
+  durationSeconds?: number;
+  responses?: Record<string, string>;
 }
 
 interface PyqCbtSessionProps {
@@ -93,6 +107,8 @@ interface PyqCbtSessionProps {
     accuracyPct: number;
     durationSeconds: number;
   }) => void;
+  onCompleteDailyDpp?: (payload: DailyCompletionPayload) => void;
+  onCompleteDailyGa?: (payload: DailyCompletionPayload) => void;
   onSaveVerifiedAnswer: (
     record: Omit<VerifiedAnswerRecord, 'updatedAt'>
   ) => Promise<VerifiedAnswerRecord>;
@@ -162,6 +178,8 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
   onSaveTraceTable,
   onDeleteTraceTable,
   onCompleteGaSprint,
+  onCompleteDailyDpp,
+  onCompleteDailyGa,
   onSaveVerifiedAnswer,
   onVerifySinglePyq,
   onToggleCalculator,
@@ -557,45 +575,87 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
     let marksAwarded = 0;
     let maxMarks = 0;
 
+    const responsesMap: Record<string, string> = {};
+    let attemptedTotal = 0;
+
     for (const q of liveQuestions) {
       maxMarks += q.marks;
       const resp = session.responses[q.id] ?? {};
       const selText = formatSelectedAnswer(resp);
+      if (selText) {
+        responsesMap[q.id] = selText;
+      }
       if (questionHasKey(q)) {
         const res = evaluateQuestionResponse(q, resp);
         nextChecked[q.id] = res;
         if (res.attempted) {
+          attemptedTotal += 1;
           gradedAttempted += 1;
           if (res.isCorrect) correctCount += 1;
           marksAwarded += res.marksAwarded;
           onRecordAttempt(q.id, res.isCorrect, res.marksAwarded, res.maxMarks, selText);
         }
       } else if (!nextChecked[q.id]) {
+        const hasAns = hasAnswerResponse(resp);
+        if (hasAns) attemptedTotal += 1;
         nextChecked[q.id] = {
-          attempted: hasAnswerResponse(resp),
+          attempted: hasAns,
           isCorrect: false,
           marksAwarded: 0,
           maxMarks: q.marks,
           selfChecked: false,
         };
       } else if (nextChecked[q.id].attempted) {
+        attemptedTotal += 1;
         gradedAttempted += 1;
         if (nextChecked[q.id].isCorrect) correctCount += 1;
         marksAwarded += nextChecked[q.id].marksAwarded;
       }
     }
 
-    if (session.isGaSprint && onCompleteGaSprint && !session.finished) {
-      const denom = gradedAttempted > 0 ? gradedAttempted : liveQuestions.length;
-      const accuracyPct = denom > 0 ? Math.round((correctCount / denom) * 100) : 0;
-      onCompleteGaSprint({
-        questionsCount: liveQuestions.length,
-        correctCount,
-        marksAwarded: Math.round(marksAwarded * 100) / 100,
-        maxMarks,
-        accuracyPct,
-        durationSeconds: session.elapsedSeconds,
-      });
+    const roundedMarks = Math.round(marksAwarded * 100) / 100;
+    const denom = gradedAttempted > 0 ? gradedAttempted : liveQuestions.length;
+    const accuracyPct = denom > 0 ? Math.round((correctCount / denom) * 100) : 0;
+
+    if (!session.finished) {
+      if (session.dailyKind === 'dpp' && onCompleteDailyDpp) {
+        onCompleteDailyDpp({
+          dateIst: session.dailyDateIst,
+          questionIds: liveQuestions.map((q) => q.id),
+          score: roundedMarks,
+          maxMarks,
+          accuracy: accuracyPct,
+          attemptedCount: attemptedTotal,
+          correctCount,
+          durationSeconds: session.elapsedSeconds,
+          responses: responsesMap,
+        });
+      }
+
+      if ((session.dailyKind === 'ga' || session.isGaSprint) && onCompleteDailyGa) {
+        onCompleteDailyGa({
+          dateIst: session.dailyDateIst,
+          questionIds: liveQuestions.map((q) => q.id),
+          score: roundedMarks,
+          maxMarks,
+          accuracy: accuracyPct,
+          attemptedCount: attemptedTotal,
+          correctCount,
+          durationSeconds: session.elapsedSeconds,
+          responses: responsesMap,
+        });
+      }
+
+      if (session.isGaSprint && onCompleteGaSprint) {
+        onCompleteGaSprint({
+          questionsCount: liveQuestions.length,
+          correctCount,
+          marksAwarded: roundedMarks,
+          maxMarks,
+          accuracyPct,
+          durationSeconds: session.elapsedSeconds,
+        });
+      }
     }
 
     setSession((prev) => (prev ? { ...prev, checked: nextChecked, finished: true } : prev));
@@ -603,11 +663,15 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
     session.checked,
     session.responses,
     session.isGaSprint,
+    session.dailyKind,
+    session.dailyDateIst,
     session.finished,
     session.elapsedSeconds,
     liveQuestions,
     onRecordAttempt,
     onCompleteGaSprint,
+    onCompleteDailyDpp,
+    onCompleteDailyGa,
     setSession,
   ]);
 
@@ -625,6 +689,10 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
         ? q.correctOption
         : q.format === 'MSQ'
         ? q.correctOptions?.join(', ')
+        : typeof q.natRangeMin === 'number' &&
+          typeof q.natRangeMax === 'number' &&
+          q.natRangeMin !== q.natRangeMax
+        ? `${q.natRangeMin} to ${q.natRangeMax}${q.natUnit ? ` ${q.natUnit}` : ''}`
         : `${q.natAnswer}${q.natUnit ? ` ${q.natUnit}` : ''}`;
 
     return (
@@ -1420,7 +1488,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 font-semibold text-[#6E261A] dark:text-[#E0A92E] hover:underline ml-auto"
               >
-                GateOverflow ↗
+                {currentQ.sourceUrl.includes('github.com') ? 'GitHub Source ↗' : 'GateOverflow ↗'}
               </a>
             )}
           </div>

@@ -13,6 +13,7 @@ interface UseSwipeTabNavigationOptions {
   activeView: NavView;
   enabled: boolean;
   disabled?: boolean;
+  simpleMode?: boolean;
   onSelectTab: (view: NavView) => void;
 }
 
@@ -46,6 +47,7 @@ export function useSwipeTabNavigation({
   activeView,
   enabled,
   disabled = false,
+  simpleMode = false,
   onSelectTab,
 }: UseSwipeTabNavigationOptions): SwipeTabNavigationState {
   const [dragOffsetX, setDragOffsetX] = useState(0);
@@ -184,12 +186,12 @@ export function useSwipeTabNavigation({
       }
 
       const vw = typeof window !== 'undefined' ? window.innerWidth : 390;
-      const visual = computeSwipeVisualOffset(dx, activeView, vw);
+      const visual = computeSwipeVisualOffset(dx, activeView, vw, simpleMode);
       setDragOffsetX(visual.offsetX);
       setPeekTab(visual.peekTab);
       setPeekSide(visual.peekTab ? (dx > 0 ? 'left' : 'right') : null);
     },
-    [activeView, canSwipeNow]
+    [activeView, canSwipeNow, simpleMode]
   );
 
   const onTouchEnd = useCallback(
@@ -215,6 +217,7 @@ export function useSwipeTabNavigation({
         durationMs,
         viewportWidth: vw,
         currentView: activeView,
+        simpleMode,
       });
 
       if (decision.shouldCommit && decision.targetTab) {
@@ -224,7 +227,7 @@ export function useSwipeTabNavigation({
         resetVisuals(true);
       }
     },
-    [activeView, isDragging, onSelectTab, resetVisuals]
+    [activeView, isDragging, onSelectTab, resetVisuals, simpleMode]
   );
 
   const onTouchCancel = useCallback(() => {

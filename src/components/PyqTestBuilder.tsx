@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import {
   Play,
   RefreshCw,
@@ -10,13 +10,16 @@ import {
   X,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   EyeOff,
   Shuffle,
   FileDown,
+  RotateCcw,
 } from 'lucide-react';
 import type {
   GateRSyncStatus,
   PdfExportRequest,
+  PyqSourceFilter,
   Question,
   QuestionFormat,
   SubjectId,
@@ -25,11 +28,19 @@ import type {
 import { GATE_2027_SYLLABUS } from '../data/syllabus';
 import {
   extractTopSubtopicTags,
-  filterPyqBank,
-  type PyqFilterCriteria,
   type StatusFilterMode,
   type YearRangePreset,
 } from '../utils/gaterNormalizer';
+import {
+  buildExactCountTest,
+  computeSourceFilterCounts,
+  computeSubjectMatchCounts,
+  computeUniqueFilteredPool,
+  readServedQuestionHistory,
+  recordServedQuestions,
+  resetServedQuestionHistory,
+  type TestBuilderFilterCriteria,
+} from '../utils/testBuilder';
 import type { GaStreakMetrics } from '../utils/gaStreak';
 import { DailyGaLockInCard } from './DailyGaLockInCard';
 
@@ -40,9 +51,13 @@ interface PyqTestBuilderProps {
   allQuestions: Question[];
   gaterSyncStatus: GateRSyncStatus;
   gaterCount: number;
+  arshanCount?: number;
+  enrichedCount?: number;
+  verifiedBankCount?: number;
+  syncProgressMsg?: string;
   gaterSyncedAt: string;
   gaterError: string;
-  onResyncGateR: () => Promise<unknown>;
+  onResyncGateR: () => Promise<{ ok?: boolean; message?: string } | unknown>;
   onStartSession: (
     title: string,
     questions: Question[],
@@ -52,6 +67,7 @@ interface PyqTestBuilderProps {
   gaStreakMetrics?: GaStreakMetrics;
   onStartGaSprint?: () => void;
   onRequestPdfExport: (req: PdfExportRequest) => void;
+  onNotify?: (msg: string) => void;
 }
 
 const YEAR_PRESETS: Array<{ id: YearRangePreset; label: string }> = [
@@ -69,11 +85,24 @@ const STATUS_OPTIONS: Array<{ id: StatusFilterMode; label: string }> = [
   { id: 'bookmarked', label: 'Bookmarked' },
 ];
 
+const SOURCE_FILTERS: Array<{ id: PyqSourceFilter; label: string }> = [
+  { id: 'all', label: 'All Questions' },
+  { id: 'pyq_only', label: 'PYQs Only' },
+  { id: 'extra_predicted', label: 'Extra & Predicted 2027' },
+  { id: 'verified_only', label: 'Verified Answer Key Only' },
+  { id: 'arshan_bank', label: 'Arshan Bank' },
+  { id: 'gater_bank', label: 'GateR Bank' },
+];
+
 export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
   state,
   allQuestions,
   gaterSyncStatus,
   gaterCount,
+  arshanCount = 0,
+  enrichedCount = 0,
+  verifiedBankCount,
+  syncProgressMsg = '',
   gaterSyncedAt,
   gaterError,
   onResyncGateR,
@@ -82,9 +111,11 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
   gaStreakMetrics,
   onStartGaSprint,
   onRequestPdfExport,
+  onNotify,
 }) => {
   const [selectedSubjects, setSelectedSubjects] = useState<SubjectId[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [sourceFilter, setSourceFilter] = useState<PyqSourceFilter>('all');
   const [tagSearch, setTagSearch] = useState<string>('');
   const [yearRange, setYearRange] = useState<YearRangePreset>('all');
   const [specificYear, setSpecificYear] = useState<number | null>(null);
@@ -96,29 +127,81 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
   );
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sessionMode, setSessionMode] = useState<SessionMode>('practice_sprint');
-  const [questionCount, setQuestionCount] = useState<number>(15);
-  const [shuffleOrder, setShuffleOrder] = useState<boolean>(false);
+  const [questionCount, setQuestionCount] = useState<number>(25);
+  const [shuffleOrder, setShuffleOrder] = useState<boolean>(true);
+  const [servedHistory, setServedHistory] = useState<Record<string, number>>(() =>
+    readServedQuestionHistory()
+  );
 
   useEffect(() => {
     setHideRemoved2027(state.settings.autoHideRemoved2027 ?? true);
   }, [state.settings.autoHideRemoved2027]);
 
-  // Per-subject totals for badge counts
-  const subjectCounts = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const q of allQuestions) {
-      if (hideRemoved2027 && q.isOutOf2027Syllabus) continue;
-      map[q.subjectId] = (map[q.subjectId] ?? 0) + 1;
-    }
-    return map;
-  }, [allQuestions, hideRemoved2027]);
+  const criteria: TestBuilderFilterCriteria = useMemo(
+    () => ({
+      subjects: selectedSubjects,
+      tags: selectedTags,
+      sourceFilter,
+      yearRange,
+      specificYear,
+      marks: marksFilter,
+      format: formatFilter,
+      status: statusFilter,
+      hideRemoved2027,
+      searchQuery,
+    }),
+    [
+      selectedSubjects,
+      selectedTags,
+      sourceFilter,
+      yearRange,
+      specificYear,
+      marksFilter,
+      formatFilter,
+      statusFilter,
+      hideRemoved2027,
+      searchQuery,
+    ]
+  );
+
+  // Strictly deduplicated filtered pool matching EVERY active filter (never silently drops unverified Qs)
+  const matchedQuestions = useMemo(
+    () =>
+      computeUniqueFilteredPool(
+        allQuestions,
+        criteria,
+        state.attempts,
+        state.mistakes,
+        state.bookmarkedQuestions
+      ),
+    [allQuestions, criteria, state.attempts, state.mistakes, state.bookmarkedQuestions]
+  );
+
+  // Live accurate matching counts per subject chip under current non-subject filters
+  const subjectCounts = useMemo(
+    () =>
+      computeSubjectMatchCounts(
+        allQuestions,
+        criteria,
+        state.attempts,
+        state.mistakes,
+        state.bookmarkedQuestions
+      ),
+    [allQuestions, criteria, state.attempts, state.mistakes, state.bookmarkedQuestions]
+  );
+
+  // Live counts per Source filter pill
+  const sourceCounts = useMemo(
+    () => computeSourceFilterCounts(allQuestions, hideRemoved2027),
+    [allQuestions, hideRemoved2027]
+  );
 
   const removed2027Count = useMemo(
     () => allQuestions.filter((q) => q.isOutOf2027Syllabus).length,
     [allQuestions]
   );
 
-  // Available paper years for specific-year picker
+  // Available paper years for specific-year picker (includes 2027 for Predicted GATE 2027)
   const availableYears = useMemo(() => {
     const years = new Set<number>();
     for (const q of allQuestions) {
@@ -139,43 +222,6 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
     return list.slice(0, 24);
   }, [topTags, tagSearch]);
 
-  const criteria: PyqFilterCriteria = useMemo(
-    () => ({
-      subjects: selectedSubjects,
-      tags: selectedTags,
-      yearRange,
-      specificYear,
-      marks: marksFilter,
-      format: formatFilter,
-      status: statusFilter,
-      hideRemoved2027,
-      searchQuery,
-    }),
-    [
-      selectedSubjects,
-      selectedTags,
-      yearRange,
-      specificYear,
-      marksFilter,
-      formatFilter,
-      statusFilter,
-      hideRemoved2027,
-      searchQuery,
-    ]
-  );
-
-  const matchedQuestions = useMemo(
-    () =>
-      filterPyqBank(
-        allQuestions,
-        criteria,
-        state.attempts,
-        state.mistakes,
-        state.bookmarkedQuestions
-      ),
-    [allQuestions, criteria, state.attempts, state.mistakes, state.bookmarkedQuestions]
-  );
-
   const toggleSubject = (id: SubjectId) => {
     setSelectedSubjects((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
@@ -191,6 +237,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
   const resetFilters = () => {
     setSelectedSubjects([]);
     setSelectedTags([]);
+    setSourceFilter('all');
     setTagSearch('');
     setYearRange('all');
     setSpecificYear(null);
@@ -200,34 +247,72 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
     setSearchQuery('');
   };
 
+  const handleSyncAllReposClick = useCallback(async () => {
+    const res = (await onResyncGateR()) as { ok?: boolean; message?: string } | undefined;
+    if (res?.message && onNotify) {
+      onNotify(res.message);
+    }
+  }, [onResyncGateR, onNotify]);
+
+  const handleResetSeenHistory = useCallback(() => {
+    const empty = resetServedQuestionHistory();
+    setServedHistory(empty);
+    onNotify?.('Seen question history cleared · Fresh rotation reset.');
+  }, [onNotify]);
+
   const handleLaunch = () => {
     if (matchedQuestions.length === 0) return;
-    let pool = [...matchedQuestions];
-    if (shuffleOrder) {
-      for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [pool[i], pool[j]] = [pool[j], pool[i]];
-      }
-    }
-    const sliced = questionCount === 9999 ? pool : pool.slice(0, questionCount);
+
+    const selection = buildExactCountTest({
+      pool: matchedQuestions,
+      requestedCount: questionCount,
+      attemptedIds: state.attempts,
+      servedHistory,
+      shuffleOrder,
+    });
+
+    if (selection.questions.length === 0) return;
+
+    // Immediately record selected IDs in servedQuestionHistory so consecutive tests pull completely fresh Qs
+    const nextHistory = recordServedQuestions(
+      selection.questions.map((q) => q.id),
+      Date.now(),
+      servedHistory
+    );
+    setServedHistory(nextHistory);
+
     const modeLabel = sessionMode === 'cbt_mock' ? 'Timed CBT Mock' : 'Practice Sprint';
     const scopeLabel =
-      yearRange === 'specific' && specificYear
-        ? `GATE ${specificYear}`
+      sourceFilter === 'extra_predicted'
+        ? 'Predicted GATE 2027'
+        : yearRange === 'specific' && specificYear
+        ? specificYear === 2027
+          ? 'Predicted GATE 2027'
+          : `GATE ${specificYear}`
         : selectedSubjects.length === 1
         ? GATE_2027_SYLLABUS.find((s) => s.id === selectedSubjects[0])?.shortName ?? 'Subject'
         : selectedSubjects.length > 1
         ? `${selectedSubjects.length} Subjects`
         : 'Full GATE CSE Bank';
-    onStartSession(`${scopeLabel} · ${modeLabel} (${sliced.length} Qs)`, sliced, sessionMode);
+
+    onStartSession(
+      `${scopeLabel} · ${modeLabel} (${selection.questions.length} Qs)`,
+      selection.questions,
+      sessionMode
+    );
   };
 
   const handleExportWorksheetPdf = () => {
     if (matchedQuestions.length === 0) return;
-    const cap = questionCount === 9999 ? Math.min(65, matchedQuestions.length) : Math.min(questionCount, 65);
+    const cap =
+      questionCount === 9999
+        ? Math.min(65, matchedQuestions.length)
+        : Math.min(questionCount, 65);
     const batch = matchedQuestions.slice(0, cap);
     const scopeLabel =
-      yearRange === 'specific' && specificYear
+      sourceFilter === 'extra_predicted'
+        ? 'Predicted GATE 2027'
+        : yearRange === 'specific' && specificYear
         ? `GATE ${specificYear}`
         : selectedSubjects.length === 1
         ? GATE_2027_SYLLABUS.find((s) => s.id === selectedSubjects[0])?.name ?? 'Subject'
@@ -244,12 +329,22 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
     });
   };
 
-  const verifiedCount = Object.keys(state.verifiedAnswers).length;
   const totalBankCount = allQuestions.length;
+  const totalVerifiedCount =
+    verifiedBankCount ?? sourceCounts.verified_only;
+  const seenHistoryCount = Object.keys(servedHistory).length;
+  const effectiveBatchCount =
+    questionCount === 9999
+      ? matchedQuestions.length
+      : Math.min(matchedQuestions.length, questionCount);
+  const hasShortfall =
+    questionCount !== 9999 &&
+    matchedQuestions.length > 0 &&
+    matchedQuestions.length < questionCount;
 
   return (
     <div className="space-y-5">
-      {/* GateR Sync Status Banner Pill Bar */}
+      {/* Combined GateR + Arshan Sync Status Banner Pill Bar */}
       <div className="rounded-[24px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] px-5 py-4 shadow-warm flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5">
           {gaterSyncStatus === 'syncing' ? (
@@ -258,15 +353,16 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
               className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-[#EED89A] dark:border-[#5C441B] bg-[#FDF6E3] dark:bg-[#2C2215] text-xs font-semibold text-[#8B6209] dark:text-[#E0A92E]"
             >
               <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-              Syncing GateR GitHub Bank into IndexedDB...
+              Syncing GateR + Arshan GitHub Banks into IndexedDB...
             </span>
           ) : gaterSyncStatus === 'synced' ? (
             <span
               data-testid="gater-sync-pill"
               className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-[#B8D7C3] dark:border-[#264D34] bg-[#EBF5EE] dark:bg-[#152B1D] text-xs font-semibold text-[#2E5E3E] dark:text-[#7BB88F]"
             >
-              <span className="h-2 w-2 rounded-full bg-[#2E5E3E] dark:bg-[#7BB88F]" />
-              GateR Bank Synced · {totalBankCount.toLocaleString()} PYQs Ready
+              <span className="h-2 w-2 rounded-full bg-[#2E5E3E] dark:bg-[#7BB88F] shrink-0" />
+              Bank Synced · {totalBankCount.toLocaleString()} Qs (GateR + Arshan ·{' '}
+              {totalVerifiedCount.toLocaleString()} With Verified Answers)
             </span>
           ) : (
             <span
@@ -274,27 +370,30 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
               className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-[#EED89A] dark:border-[#5C441B] bg-[#FDF6E3] dark:bg-[#2C2215] text-xs font-semibold text-[#8B6209] dark:text-[#E0A92E]"
             >
               <AlertCircle className="h-3.5 w-3.5" />
-              Local Cache · {totalBankCount.toLocaleString()} PYQs Ready
+              Local Cache · {totalBankCount.toLocaleString()} Qs Ready ({totalVerifiedCount} Verified)
             </span>
           )}
 
           <span className="text-[11px] font-mono text-[#61554D] dark:text-[#A99B8E] tabular-nums">
-            {gaterCount > 0 ? `${gaterCount.toLocaleString()} GateR` : 'Curated'} ·{' '}
-            {verifiedCount} Verified Keys
-            {gaterSyncedAt ? ` · Cached Offline` : ''}
+            {gaterCount > 0 ? `${gaterCount.toLocaleString()} GateR` : 'Curated'}
+            {arshanCount > 0 ? ` · ${arshanCount} Arshan` : ''}
+            {enrichedCount > 0 ? ` (${enrichedCount} Enriched Keys)` : ''}
+            {gaterSyncedAt ? ' · Cached Offline' : ''}
           </span>
         </div>
 
         <div className="flex flex-nowrap md:flex-wrap items-center gap-2 overflow-x-auto no-scrollbar py-0.5 px-1 -mx-1 md:mx-0 md:px-0 w-full md:w-auto">
           <button
             type="button"
-            onClick={() => void onResyncGateR()}
+            data-testid="sync-all-repos-btn"
+            onClick={() => void handleSyncAllReposClick()}
             disabled={gaterSyncStatus === 'syncing'}
             className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 h-8 px-3 sm:px-3.5 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] hover:border-[#C89216] dark:hover:border-[#E0A92E] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] disabled:opacity-50 press-tactile"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${gaterSyncStatus === 'syncing' ? 'animate-spin' : ''}`} />
-            <span className="sm:hidden">Re-Sync</span>
-            <span className="hidden sm:inline">Re-Sync from GitHub</span>
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${gaterSyncStatus === 'syncing' ? 'animate-spin' : ''}`}
+            />
+            <span>Sync All Repos</span>
           </button>
 
           <button
@@ -312,6 +411,12 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
       {gaterError && (
         <div className="rounded-[20px] border border-[#EED89A] dark:border-[#5C441B] bg-[#FDF6E3] dark:bg-[#2C2215] px-4 py-2.5 text-xs text-[#8B6209] dark:text-[#E0A92E]">
           {gaterError}
+        </div>
+      )}
+
+      {!gaterError && syncProgressMsg && gaterSyncStatus === 'syncing' && (
+        <div className="rounded-[20px] border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] px-4 py-2 text-xs text-[#61554D] dark:text-[#A99B8E]">
+          {syncProgressMsg}
         </div>
       )}
 
@@ -334,7 +439,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
               Real GATE CBT Test Builder
             </div>
             <h2 className="mt-1 font-display text-lg font-bold text-[#1C1613] dark:text-[#F5F0E8]">
-              Filter by Subject, Subtopic, Paper Year &amp; Format
+              Filter by Source, Subject, Subtopic, Paper Year &amp; Format
             </h2>
           </div>
 
@@ -360,21 +465,89 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
 
             <button
               type="button"
+              data-testid="reset-seen-history-btn"
+              onClick={handleResetSeenHistory}
+              disabled={seenHistoryCount === 0}
+              title="Reset anti-repeat served question history"
+              className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-medium text-[#61554D] dark:text-[#A99B8E] hover:text-[#1C1613] dark:hover:text-[#F5F0E8] disabled:opacity-45 press-tactile"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>Reset Seen History</span>
+              {seenHistoryCount > 0 && (
+                <span className="font-mono text-[10px] tabular-nums">({seenHistoryCount})</span>
+              )}
+            </button>
+
+            <button
+              type="button"
               onClick={resetFilters}
               className="shrink-0 whitespace-nowrap h-8 px-3 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] text-xs font-medium text-[#61554D] dark:text-[#A99B8E] hover:text-[#1C1613] dark:hover:text-[#F5F0E8] press-tactile"
             >
-              Reset All
+              Reset Filters
             </button>
           </div>
         </div>
 
-        {/* 1. Subject Multi-Select Pills */}
+        {/* 0. Single-Row Horizontally Scrollable Source Filter Pill Rail */}
+        <div className="space-y-2">
+          <span className="block text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8]">
+            Question Source &amp; Answer Key Filter
+          </span>
+          <div
+            data-testid="source-filter-rail"
+            data-no-swipe="true"
+            className="flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 -mx-1"
+          >
+            {SOURCE_FILTERS.map((sf) => {
+              const active = sourceFilter === sf.id;
+              const count = sourceCounts[sf.id] ?? 0;
+              return (
+                <button
+                  key={sf.id}
+                  type="button"
+                  data-testid={`source-filter-${sf.id}`}
+                  aria-pressed={active}
+                  onClick={(e) => {
+                    setSourceFilter(sf.id);
+                    e.currentTarget.scrollIntoView({
+                      behavior: 'smooth',
+                      inline: 'center',
+                      block: 'nearest',
+                    });
+                  }}
+                  className={`shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border text-xs font-semibold press-tactile ${
+                    active
+                      ? 'border-[#6E261A] bg-[#6E261A] dark:border-[#E0A92E] dark:bg-[#9E3E2E] text-white'
+                      : 'border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-[#1C1613] dark:text-[#F5F0E8] hover:border-[#C89216] dark:hover:border-[#E0A92E]'
+                  }`}
+                >
+                  <span>{sf.label}</span>
+                  <span
+                    className={`font-mono text-[10px] px-1.5 py-0.2 rounded-full tabular-nums ${
+                      active
+                        ? 'bg-white/20 text-white'
+                        : 'bg-[#EFE9DF] dark:bg-[#2E2520] text-[#61554D] dark:text-[#A99B8E]'
+                    }`}
+                  >
+                    {count.toLocaleString()}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 1. Subject Multi-Select Pills (Live Matching Counts) */}
         <div className="space-y-2.5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8]">
               1. IIT Madras GATE CSE 2027 Subjects{' '}
               <span className="font-normal text-[#61554D] dark:text-[#A99B8E]">
-                ({selectedSubjects.length === 0 ? 'All 11 Selected' : `${selectedSubjects.length} Selected`})
+                (
+                {selectedSubjects.length === 0
+                  ? 'All 11 Selected'
+                  : `${selectedSubjects.length} Selected`}
+                )
               </span>
             </span>
             {selectedSubjects.length > 0 && (
@@ -387,7 +560,10 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
               </button>
             )}
           </div>
-          <div className="flex flex-nowrap md:flex-wrap items-center gap-1.5 md:gap-2 overflow-x-auto no-scrollbar py-1 px-1 -mx-1 md:mx-0 md:px-0">
+          <div
+            data-no-swipe="true"
+            className="flex flex-nowrap md:flex-wrap items-center gap-1.5 md:gap-2 overflow-x-auto no-scrollbar py-1 px-1 -mx-1 md:mx-0 md:px-0"
+          >
             {GATE_2027_SYLLABUS.map((subj) => {
               const active = selectedSubjects.includes(subj.id);
               const count = subjectCounts[subj.id] ?? 0;
@@ -407,9 +583,14 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
                 <button
                   key={subj.id}
                   type="button"
+                  data-testid={`subject-chip-${subj.id}`}
                   onClick={(e) => {
                     toggleSubject(subj.id);
-                    e.currentTarget.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                    e.currentTarget.scrollIntoView({
+                      behavior: 'smooth',
+                      inline: 'center',
+                      block: 'nearest',
+                    });
                   }}
                   aria-pressed={active}
                   className={`shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border text-xs font-semibold press-tactile ${
@@ -463,7 +644,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
                 type="text"
                 value={tagSearch}
                 onChange={(e) => setTagSearch(e.target.value)}
-                placeholder="Filter GateOverflow tags (e.g. cache-memory, paging, finite-automata, sql)..."
+                placeholder="Filter tags (e.g. cache-memory, paging, discrete-mathematics, predicted-2027)..."
                 className="w-full h-9 pl-9 pr-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#130F0D] text-xs text-[#1C1613] dark:text-[#F5F0E8] placeholder:text-[#8C7E75]"
               />
             </div>
@@ -517,7 +698,10 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
               <span className="block text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8]">
                 3. Paper Year Range
               </span>
-              <div className="flex flex-nowrap md:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 -mx-1 md:mx-0 md:px-0">
+              <div
+                data-no-swipe="true"
+                className="flex flex-nowrap md:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 -mx-1 md:mx-0 md:px-0"
+              >
                 {YEAR_PRESETS.map((preset) => (
                   <button
                     key={preset.id}
@@ -525,7 +709,11 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
                     onClick={(e) => {
                       setYearRange(preset.id);
                       if (preset.id !== 'specific') setSpecificYear(null);
-                      e.currentTarget.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                      e.currentTarget.scrollIntoView({
+                        behavior: 'smooth',
+                        inline: 'center',
+                        block: 'nearest',
+                      });
                     }}
                     className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-full border text-xs font-semibold press-tactile ${
                       yearRange === preset.id
@@ -538,7 +726,10 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
                 ))}
               </div>
               <div className="flex items-center gap-2">
-                <label htmlFor="specific-year-select" className="text-[11px] text-[#61554D] dark:text-[#A99B8E] whitespace-nowrap">
+                <label
+                  htmlFor="specific-year-select"
+                  className="text-[11px] text-[#61554D] dark:text-[#A99B8E] whitespace-nowrap"
+                >
                   Or exact paper year:
                 </label>
                 <select
@@ -559,7 +750,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
                   <option value="">Any Year</option>
                   {availableYears.map((y) => (
                     <option key={y} value={y}>
-                      GATE {y}
+                      {y === 2027 ? 'Predicted GATE 2027' : `GATE ${y}`}
                     </option>
                   ))}
                 </select>
@@ -567,7 +758,10 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="pyq-keyword-search" className="block text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8]">
+              <label
+                htmlFor="pyq-keyword-search"
+                className="block text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8]"
+              >
                 Keyword Search
               </label>
               <input
@@ -639,7 +833,11 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
                   type="button"
                   onClick={(e) => {
                     setStatusFilter(st.id);
-                    e.currentTarget.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                    e.currentTarget.scrollIntoView({
+                      behavior: 'smooth',
+                      inline: 'center',
+                      block: 'nearest',
+                    });
                   }}
                   className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-full border text-xs font-semibold press-tactile ${
                     statusFilter === st.id
@@ -654,7 +852,23 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
           </div>
         </div>
 
-        {/* 5. Launch Dock: Mode Toggle, Batch Size, Shuffle, Primary CTA */}
+        {/* Inline Shortfall Amber Notice when narrow filters yield fewer unique Qs than requested */}
+        {hasShortfall && (
+          <div
+            data-testid="test-builder-shortfall-badge"
+            className="rounded-[20px] border border-[#EED89A] dark:border-[#5C441B] bg-[#FDF6E3] dark:bg-[#2C2215] px-4 py-2.5 flex items-center gap-2.5 text-xs font-medium text-[#8B6209] dark:text-[#E0A92E]"
+          >
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>
+              Only <strong className="font-mono">{matchedQuestions.length}</strong> unique question
+              {matchedQuestions.length === 1 ? '' : 's'} exist for this exact filter — starting with
+              all <strong className="font-mono">{matchedQuestions.length}</strong> or broaden
+              filters.
+            </span>
+          </div>
+        )}
+
+        {/* 5. Launch Dock: Mode Toggle, Batch Size, Anti-Repeat Shuffle, Primary CTA */}
         <div className="rounded-[24px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] p-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             {/* Mode Segmented Toggle */}
@@ -695,7 +909,10 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
 
             {/* Batch Size */}
             <div className="flex items-center gap-1.5">
-              <label htmlFor="batch-size-select" className="text-xs text-[#61554D] dark:text-[#A99B8E]">
+              <label
+                htmlFor="batch-size-select"
+                className="text-xs text-[#61554D] dark:text-[#A99B8E]"
+              >
                 Size:
               </label>
               <select
@@ -723,7 +940,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
               }`}
             >
               <Shuffle className="h-3.5 w-3.5" />
-              {shuffleOrder ? 'Shuffled' : 'Newest First'}
+              {shuffleOrder ? 'Anti-Repeat Shuffle' : 'Newest First (Fresh)'}
             </button>
           </div>
 
@@ -732,7 +949,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
               data-testid="matched-pyq-count"
               className="font-mono text-xs font-semibold text-[#61554D] dark:text-[#D8CBB8] tabular-nums"
             >
-              {matchedQuestions.length.toLocaleString()} matched
+              {matchedQuestions.length.toLocaleString()} matching
             </span>
             <button
               type="button"
@@ -757,8 +974,8 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
                 <Play className="h-3.5 w-3.5" />
               )}
               {sessionMode === 'cbt_mock'
-                ? `Start Timed CBT Mock (${Math.min(matchedQuestions.length, questionCount === 9999 ? matchedQuestions.length : questionCount)} Qs)`
-                : `Start Practice Sprint (${Math.min(matchedQuestions.length, questionCount === 9999 ? matchedQuestions.length : questionCount)} Qs)`}
+                ? `Start ${effectiveBatchCount}-Q CBT Mock (${matchedQuestions.length.toLocaleString()} matching)`
+                : `Start ${effectiveBatchCount}-Q Test (${matchedQuestions.length.toLocaleString()} matching)`}
             </button>
           </div>
         </div>

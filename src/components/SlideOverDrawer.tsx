@@ -25,9 +25,13 @@ import {
   Download,
   Smartphone,
   FlaskConical,
+  Check,
+  Palette,
+  EyeOff,
 } from 'lucide-react';
-import type { AuthUserSummary, GateRSyncStatus, NavView, SyncStatus } from '../types';
+import type { AccentThemeId, AuthUserSummary, GateRSyncStatus, NavView, SyncStatus } from '../types';
 import { GATE_2027_MILESTONES } from '../utils/examPolish';
+import { ACCENT_THEMES } from '../utils/themeEngine';
 import { useFocusTimer } from '../context/FocusTimerContext';
 
 interface SlideOverDrawerProps {
@@ -42,6 +46,10 @@ interface SlideOverDrawerProps {
   onOpenPalette: () => void;
   theme: 'light' | 'dark';
   onSetLightDark: (mode: 'light' | 'dark') => void;
+  accentTheme: AccentThemeId;
+  onSetAccentTheme: (accent: AccentThemeId) => void;
+  simpleMode: boolean;
+  onToggleSimpleMode: (enabled: boolean) => void;
   user: AuthUserSummary | null;
   syncStatus: SyncStatus;
   onSignIn: () => void;
@@ -68,6 +76,10 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
   onOpenPalette,
   theme,
   onSetLightDark,
+  accentTheme,
+  onSetAccentTheme,
+  simpleMode,
+  onToggleSimpleMode,
   user,
   syncStatus,
   onSignIn,
@@ -243,63 +255,97 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
             </div>
           </section>
 
-          {/* 2. Primary Views */}
+          {/* 2. Primary Views + Simple Mode Pill */}
           <section className="space-y-1.5">
-            <p className="px-2 text-[10px] font-semibold uppercase tracking-widest text-[#61554D] dark:text-[#A99B8E]">
-              Primary Views
-            </p>
+            <div className="px-2 flex items-center justify-between gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-[#61554D] dark:text-[#A99B8E]">
+                Primary Views
+              </p>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={simpleMode}
+                data-testid="drawer-simple-mode-toggle"
+                onClick={() => onToggleSimpleMode(!simpleMode)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold transition-colors press-tactile ${
+                  simpleMode
+                    ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-[#FAF8F4]'
+                    : 'bg-[#EFE9DF] dark:bg-[#241D19] text-[#61554D] dark:text-[#A99B8E] hover:text-[#1C1613] dark:hover:text-[#F5F0E8]'
+                }`}
+              >
+                <EyeOff className="w-3 h-3" />
+                Simple Mode {simpleMode ? 'ON' : 'OFF'}
+              </button>
+            </div>
+
+            {simpleMode && (
+              <button
+                type="button"
+                data-testid="drawer-switch-to-full-btn"
+                onClick={() => onToggleSimpleMode(false)}
+                className="w-full rounded-[16px] bg-[#FDF6E3] dark:bg-[#2C2215] border border-[#EED89A] dark:border-[#5C441B] px-3 py-2 flex items-center justify-between text-[11px] font-semibold text-[#6E261A] dark:text-[#E0A92E] press-tactile"
+              >
+                <span>Simple Mode Active</span>
+                <span className="underline underline-offset-2">Switch to Full →</span>
+              </button>
+            )}
+
             <div className="rounded-[22px] bg-white dark:bg-[#1C1714] border border-[#E8E0D5] dark:border-[#2E2520] p-1.5 space-y-0.5">
               {[
-                { id: 'dashboard' as const, label: 'Overview', icon: LayoutDashboard },
+                { id: 'dashboard' as const, label: 'Overview', icon: LayoutDashboard, core: true },
+                { id: 'syllabus' as const, label: 'Subjects (11)', icon: BookOpen, core: true },
+                { id: 'pyq' as const, label: 'PYQ Studio', icon: Code2, core: true },
                 {
                   id: 'focus' as const,
                   label: 'Focus Studio',
                   icon: Timer,
+                  core: true,
                   badge: focusStatus === 'running' ? 'Live' : undefined,
                 },
-                { id: 'syllabus' as const, label: 'Subjects (11)', icon: BookOpen },
-                { id: 'pyq' as const, label: 'PYQ Studio', icon: Code2 },
-                { id: 'cslab' as const, label: 'CS Lab (Visualizers)', icon: FlaskConical },
+                { id: 'mocks' as const, label: 'Mocks & Analytics', icon: LineChart, core: true },
+                { id: 'cslab' as const, label: 'CS Lab (Visualizers)', icon: FlaskConical, core: false },
                 {
                   id: 'revision' as const,
                   label: 'Rapid-Fire Revision',
                   icon: Zap,
+                  core: false,
                   badge: dueRevisionCount > 0 ? `${dueRevisionCount} due` : undefined,
                 },
-                { id: 'tips' as const, label: 'Daily Traps & Tips', icon: Sparkles },
-                { id: 'mocks' as const, label: 'Mocks & Analytics', icon: LineChart },
-              ].map((item) => {
-                const Icon = item.icon;
-                const active = activeView === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleNav(item.id)}
-                    className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-[14px] text-xs font-medium transition-colors press-tactile ${
-                      active
-                        ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-white'
-                        : 'text-[#1C1613] dark:text-[#F5F0E8] hover:bg-[#F4EFE6] dark:hover:bg-[#241D19]'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2.5">
-                      <Icon className="w-3.5 h-3.5 shrink-0" />
-                      {item.label}
-                    </span>
-                    {item.badge && (
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-semibold tabular-nums ${
-                          active
-                            ? 'bg-white/20 text-white'
-                            : 'bg-[#FDF6E3] dark:bg-[#2C2215] text-[#8E620C] dark:text-[#E0A92E]'
-                        }`}
-                      >
-                        {item.badge}
+                { id: 'tips' as const, label: 'Daily Traps & Tips', icon: Sparkles, core: false },
+              ]
+                .filter((item) => !simpleMode || item.core)
+                .map((item) => {
+                  const Icon = item.icon;
+                  const active = activeView === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleNav(item.id)}
+                      className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-[14px] text-xs font-medium transition-colors press-tactile ${
+                        active
+                          ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-white'
+                          : 'text-[#1C1613] dark:text-[#F5F0E8] hover:bg-[#F4EFE6] dark:hover:bg-[#241D19]'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <Icon className="w-3.5 h-3.5 shrink-0" />
+                        {item.label}
                       </span>
-                    )}
-                  </button>
-                );
-              })}
+                      {item.badge && (
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-semibold tabular-nums ${
+                            active
+                              ? 'bg-white/20 text-white'
+                              : 'bg-[#FDF6E3] dark:bg-[#2C2215] text-[#8E620C] dark:text-[#E0A92E]'
+                          }`}
+                        >
+                          {item.badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
 
               <button
                 type="button"
@@ -469,13 +515,14 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
           </section>
         </div>
 
-        {/* 5. Settings, Theme & Credit Footer */}
-        <div className="px-4 py-3.5 border-t border-[#E8E0D5] dark:border-[#2E2520] bg-white/80 dark:bg-[#1C1714]/90 shrink-0 space-y-2.5">
+        {/* 5. Settings, Light/Dark, 8-Color Theme Swatches & Credit Footer */}
+        <div className="px-4 py-3 border-t border-[#E8E0D5] dark:border-[#2E2520] bg-white/85 dark:bg-[#1C1714]/95 shrink-0 space-y-2.5">
           <div className="flex items-center gap-2">
             {/* Segmented Light/Dark Pill */}
             <div className="flex-1 flex items-center p-1 rounded-full bg-[#EFE9DF] dark:bg-[#261E1A] border border-[#E8E0D5] dark:border-[#352A24]">
               <button
                 type="button"
+                data-testid="drawer-theme-light"
                 onClick={() => onSetLightDark('light')}
                 className={`flex-1 py-1.5 rounded-full text-xs font-medium flex items-center justify-center gap-1.5 transition-all ${
                   theme === 'light'
@@ -488,6 +535,7 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
               </button>
               <button
                 type="button"
+                data-testid="drawer-theme-dark"
                 onClick={() => onSetLightDark('dark')}
                 className={`flex-1 py-1.5 rounded-full text-xs font-medium flex items-center justify-center gap-1.5 transition-all ${
                   theme === 'dark'
@@ -505,13 +553,67 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
               onClick={() => handleNav('settings')}
               className={`px-3.5 py-2 rounded-full text-xs font-semibold flex items-center gap-1.5 press-tactile ${
                 activeView === 'settings'
-                  ? 'bg-[#6E261A] text-white'
+                  ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-white'
                   : 'bg-[#F4EFE6] dark:bg-[#241D19] text-[#1C1613] dark:text-[#F5F0E8] border border-[#E8E0D5] dark:border-[#352A24]'
               }`}
             >
               <Settings className="w-3.5 h-3.5" />
               Settings
             </button>
+          </div>
+
+          {/* Curated 8-Color Theme Switcher (4x2 Diagonally Split Dual-Tone Swatches) */}
+          <div
+            data-testid="drawer-color-theme-card"
+            className="rounded-[20px] bg-[#FAF8F4] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520] p-2.5 space-y-2"
+          >
+            <div className="flex items-center justify-between px-1">
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-[#61554D] dark:text-[#A99B8E]">
+                <Palette className="w-3 h-3 text-[#6E261A] dark:text-[#E0A92E]" />
+                Color Theme
+              </span>
+              <span className="text-[10px] font-semibold text-[#6E261A] dark:text-[#E0A92E] truncate max-w-[160px]">
+                {ACCENT_THEMES.find((t) => t.id === accentTheme)?.shortName ?? 'Heritage'}
+              </span>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {ACCENT_THEMES.map((t) => {
+                const isSelected = accentTheme === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    title={t.name}
+                    aria-label={`Switch color theme to ${t.name}`}
+                    aria-pressed={isSelected}
+                    data-testid={`drawer-accent-${t.id}`}
+                    onClick={() => onSetAccentTheme(t.id)}
+                    className={`flex flex-col items-center gap-1 py-1.5 px-1 rounded-[14px] transition-all press-tactile ${
+                      isSelected
+                        ? 'bg-[#FFFFFF] dark:bg-[#1C1714] ring-1 ring-[#6E261A] dark:ring-[#E0A92E] shadow-xs'
+                        : 'hover:bg-[#FFFFFF]/70 dark:hover:bg-[#1C1714]/60'
+                    }`}
+                  >
+                    <span
+                      data-theme-swatch="true"
+                      style={{
+                        background: `linear-gradient(135deg, ${t.swatchPrimary} 50%, ${t.swatchSecondary} 50%)`,
+                      }}
+                      className={`w-6 h-6 rounded-full flex items-center justify-center shadow-xs transition-transform ${
+                        isSelected
+                          ? 'scale-105 ring-2 ring-offset-2 ring-[#C89216] dark:ring-offset-[#1C1714]'
+                          : 'border border-black/10 dark:border-white/15'
+                      }`}
+                    >
+                      {isSelected && <Check className="w-3 h-3 text-white drop-shadow" strokeWidth={3} />}
+                    </span>
+                    <span className="text-[10px] font-medium text-[#1C1613] dark:text-[#F5F0E8] leading-none truncate max-w-full">
+                      {t.shortName}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <p className="text-center text-[11px] font-medium text-[#61554D] dark:text-[#A99B8E]">

@@ -78,11 +78,12 @@ service cloud.firestore {
           'lastAutopilotIstDate', 'bookmarkedQuestions', 'bookmarkedTips', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'ownerId', 'theme', 'themeMode', 'uiScale', 'contentWidth',
+          'ownerId', 'theme', 'themeMode', 'accentTheme', 'simpleMode',
+          'uiScale', 'contentWidth',
           'targetDateIso', 'shift', 'dailyGoalMinutes',
           'pomodoroWorkMinutes', 'pomodoroShortBreakMinutes', 'pomodoroLongBreakMinutes',
           'timerChimeEnabled', 'autoHideRemoved2027', 'autoAddWrongToMistakes',
-          'showLivePaceTimer', 'enableKeyboardShortcuts',
+          'showLivePaceTimer', 'enableKeyboardShortcuts', 'enableMobileSwipeNav',
           'lastAutopilotIstDate', 'lastTrapsIstDate',
           'bookmarkedQuestions', 'bookmarkedTips', 'updatedAt'
         ])
@@ -91,6 +92,8 @@ service cloud.firestore {
         && isValidId(data.ownerId)
         && data.theme in ['light', 'dark']
         && (!('themeMode' in data) || data.themeMode in ['light', 'dark', 'system'])
+        && (!('accentTheme' in data) || data.accentTheme in ['brown', 'green', 'red', 'blue', 'teal', 'graphite', 'navy', 'olive'])
+        && isOptionalBool(data, 'simpleMode')
         && (!('uiScale' in data) || data.uiScale in ['compact', 'default', 'comfortable'])
         && (!('contentWidth' in data) || data.contentWidth in ['focused', 'wide'])
         && data.targetDateIso is string && data.targetDateIso.size() >= 10 && data.targetDateIso.size() <= 40
@@ -104,6 +107,7 @@ service cloud.firestore {
         && isOptionalBool(data, 'autoAddWrongToMistakes')
         && isOptionalBool(data, 'showLivePaceTimer')
         && isOptionalBool(data, 'enableKeyboardShortcuts')
+        && isOptionalBool(data, 'enableMobileSwipeNav')
         && data.lastAutopilotIstDate is string && data.lastAutopilotIstDate.size() <= 16
         && (!('lastTrapsIstDate' in data) || (data.lastTrapsIstDate is string && data.lastTrapsIstDate.size() <= 16))
         && isValidStringList(data.bookmarkedQuestions, 200)
@@ -429,6 +433,37 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidDailyProgress(data, userId) {
+      return data.keys().hasAll([
+          'ownerId', 'usedDailyDppIds', 'usedDailyGaIds',
+          'dailyDppByDate', 'dailyGaByDate', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'usedDailyDppIds', 'usedDailyGaIds',
+          'dailyDppByDate', 'dailyGaByDate', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && isValidId(data.ownerId)
+        && isValidStringList(data.usedDailyDppIds, 4000)
+        && isValidStringList(data.usedDailyGaIds, 1000)
+        && data.dailyDppByDate is map && data.dailyDppByDate.size() <= 366
+        && data.dailyGaByDate is map && data.dailyGaByDate.size() <= 366
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidStandaloneRoughWork(data, userId) {
+      return data.keys().hasAll(['ownerId', 'activeSheetId', 'sheets', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'activeSheetId', 'sheets', 'updatedAt'])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && isValidId(data.ownerId)
+        && data.activeSheetId is string && data.activeSheetId.size() >= 1 && data.activeSheetId.size() <= 64
+        && data.sheets is list && data.sheets.size() >= 1 && data.sheets.size() <= 12
+        && data.sheets[0] is map
+        && data.updatedAt is timestamp;
+    }
+
     // ==================== COLLECTION MATCH RULES ====================
 
     match /users/{userId} {
@@ -467,11 +502,12 @@ service cloud.firestore {
           && incoming().updatedAt == request.time
           && parentUserExists(userId)
           && incoming().diff(existing()).affectedKeys().hasOnly([
-            'theme', 'themeMode', 'uiScale', 'contentWidth',
+            'theme', 'themeMode', 'accentTheme', 'simpleMode',
+            'uiScale', 'contentWidth',
             'targetDateIso', 'shift', 'dailyGoalMinutes',
             'pomodoroWorkMinutes', 'pomodoroShortBreakMinutes', 'pomodoroLongBreakMinutes',
             'timerChimeEnabled', 'autoHideRemoved2027', 'autoAddWrongToMistakes',
-            'showLivePaceTimer', 'enableKeyboardShortcuts',
+            'showLivePaceTimer', 'enableKeyboardShortcuts', 'enableMobileSwipeNav',
             'lastAutopilotIstDate', 'lastTrapsIstDate',
             'bookmarkedQuestions', 'bookmarkedTips', 'updatedAt'
           ]);
@@ -774,6 +810,50 @@ service cloud.firestore {
             'name', 'cardCount', 'cards', 'updatedAt'
           ]);
         allow delete: if isVerified() && isOwner(userId) && isValidId(packId);
+      }
+
+      match /daily_progress/{docId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(docId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(docId)
+          && isValidDailyProgress(incoming(), userId)
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(docId)
+          && isValidDailyProgress(incoming(), userId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'usedDailyDppIds', 'usedDailyGaIds', 'dailyDppByDate', 'dailyGaByDate', 'updatedAt'
+          ]);
+        allow delete: if isVerified() && isOwner(userId) && isValidId(docId);
+      }
+
+      match /rough_work/{docId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(docId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(docId)
+          && isValidStandaloneRoughWork(incoming(), userId)
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(docId)
+          && isValidStandaloneRoughWork(incoming(), userId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'activeSheetId', 'sheets', 'updatedAt'
+          ]);
+        allow delete: if isVerified() && isOwner(userId) && isValidId(docId);
       }
     }
   }

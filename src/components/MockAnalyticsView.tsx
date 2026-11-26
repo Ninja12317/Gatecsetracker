@@ -31,6 +31,7 @@ import {
   FileDown,
 } from 'lucide-react';
 import type {
+  AccentThemeId,
   MockSubjectId,
   MockTestEntry,
   MockTestType,
@@ -38,6 +39,7 @@ import type {
 } from '../types';
 import { GATE_2027_SYLLABUS, SUBJECT_MAP } from '../data/syllabus';
 import { toLocalIsoDate } from '../utils/gateMath';
+import { getActiveThemePalette } from '../utils/themeEngine';
 import {
   SAMPLE_GO_CLASSES_PASTE,
   computeMockDiagnostics,
@@ -50,6 +52,7 @@ interface MockAnalyticsViewProps {
   mocks: MockTestEntry[];
   progress: Record<string, SubtopicProgress>;
   theme: 'light' | 'dark';
+  accentTheme?: AccentThemeId;
   onAddMock: (mock: Omit<MockTestEntry, 'id'>) => void;
   onDeleteMock: (mockId: string) => void;
   onExportMockPdf?: () => void;
@@ -97,6 +100,7 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
   mocks,
   progress,
   theme,
+  accentTheme = 'brown',
   onAddMock,
   onDeleteMock,
   onExportMockPdf,
@@ -117,22 +121,23 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
   const [savedBanner, setSavedBanner] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
 
-  // Strict Zero-Blue IIT Madras Warm Recharts Palette
+  // Live 8-Theme Recharts Palette (defaults to IIT Madras Heritage Brown & Gold)
   const isDark = theme === 'dark';
-  const gridStroke = isDark ? '#2E2520' : '#E8E0D5';
-  const axisTick = isDark ? '#A99B8E' : '#61554D';
-  const maroonColor = isDark ? '#D4624E' : '#6E261A'; // Heritage Maroon-Brown
-  const goldColor = isDark ? '#E0A92E' : '#C89216'; // Imperial Gold
-  const oliveColor = isDark ? '#7BB88F' : '#2E5E3E'; // Olive-Bronze (Correct / Positive)
-  const crimsonColor = isDark ? '#E06B60' : '#B83227'; // Terracotta Crimson (Penalty / Wrong)
-  const stoneColor = isDark ? '#7A6C63' : '#BFB3A6'; // Warm Stone (Skipped)
+  const palette = getActiveThemePalette(accentTheme, isDark);
+  const gridStroke = palette.chartGrid;
+  const axisTick = palette.chartAxis;
+  const maroonColor = palette.chartPrimary;
+  const goldColor = palette.chartSecondary;
+  const oliveColor = palette.semanticOlive;
+  const crimsonColor = palette.semanticCrimson;
+  const stoneColor = palette.chartMuted;
 
   const tooltipStyle = {
-    backgroundColor: isDark ? '#1C1714' : '#FFFFFF',
-    border: `1px solid ${isDark ? '#3A2E28' : '#E8E0D5'}`,
+    backgroundColor: palette.surfaceCard,
+    border: `1px solid ${palette.borderHairline}`,
     borderRadius: '18px',
     fontSize: '12px',
-    color: isDark ? '#F5F0E8' : '#1C1613',
+    color: palette.inkPrimary,
     boxShadow: '0 12px 32px -12px rgba(45, 28, 18, 0.18)',
   };
 

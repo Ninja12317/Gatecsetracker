@@ -17,6 +17,15 @@ import {
   parseAndCategorizeBulkJson,
   resolveGithubVaultCandidateUrls,
 } from './src/utils/vaultImporter.ts';
+import {
+  extractArshanPyqData,
+  extractEmbeddedQuestionsFromJsSafe,
+  extractQuestionsFromArshanMarkdown,
+  normalizeArshanStructuredQuestions,
+  questionHasAnswerKey,
+  type ArshanPyqKeyRecord,
+} from './src/utils/arshanNormalizer.ts';
+import { deduplicateQuestionPool } from './src/utils/testBuilder.ts';
 import type { Question, SubjectId, TipItem } from './src/types/index.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -41,6 +50,17 @@ interface GateRRepoCacheEntry {
 }
 
 let gaterRepoCache: GateRRepoCacheEntry | null = null;
+
+interface ArshanRepoCacheEntry {
+  branch: string;
+  syncedAt: string;
+  fetchedAtMs: number;
+  playableCount: number;
+  pyqKeysCount: number;
+  rawText: string;
+}
+
+let arshanRepoCache: ArshanRepoCacheEntry | null = null;
 
 interface DailyAutopilotCacheEntry {
   istDate: string;
@@ -162,6 +182,8 @@ async function startServer() {
       istDate: getIstDateString(),
       dailyAutopilotCached: dailyAutopilotCache?.istDate === getIstDateString(),
       gaterCachedCount: gaterRepoCache?.count ?? 0,
+      arshanCachedPlayableCount: arshanRepoCache?.playableCount ?? 0,
+      arshanCachedPyqKeysCount: arshanRepoCache?.pyqKeysCount ?? 0,
     });
   });
 
@@ -269,6 +291,228 @@ async function startServer() {
       ok: false,
       message: `Could not sync GateR dataset right now (${lastError}). Serving local cached bank.`,
     });
+  });
+
+  /**
+   * GET /api/sync-arshan-repo
+   * Server-side CORS-free proxy for https://github.com/arshanalikhan/gate-cse.
+   * Performs dynamic tree discovery in 1 GitHub API call (main -> master -> default_branch fallback),
+   * then fetches raw JSON/JS/MD files from raw.githubusercontent.com (zero API rate-limit burn).
+   */
+  app.get('/api/sync-arshan-repo', async (req, res) => {
+    const force = req.query.force === '1' || req.query.force === 'true';
+    const now = Date.now();
+
+    if (!force && arshanRepoCache && now - arshanRepoCache.fetchedAtMs < GATER_CACHE_TTL_MS) {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.send(arshanRepoCache.rawText);
+      return;
+    }
+
+    const ARSHAN_OWNER = 'arshanalikhan';
+    const ARSHAN_REPO = 'gate-cse';
+    const candidateBranches = ['main', 'master'];
+
+    // Discover branch & recursive file tree cleanly in a single API call
+    let resolvedBranch = 'main';
+    let treePaths: string[] = [];
+
+    for (const branch of candidateBranches) {
+      try {
+        const treeUrl = `https://api.github.com/repos/${ARSHAN_OWNER}/${ARSHAN_REPO}/git/trees/${branch}?recursive=1`;
+        const treeResp = await fetchWithTimeout(treeUrl, 10_000);
+        if (!treeResp.ok) continue;
+        const treeJson = (await treeResp.json()) as {
+          tree?: Array<{ path?: string; type?: string; size?: number }>;
+        };
+        if (Array.isArray(treeJson.tree) && treeJson.tree.length > 0) {
+          resolvedBranch = branch;
+          treePaths = treeJson.tree
+            .filter(
+              (entry) =>
+                entry.type === 'blob' &&
+                typeof entry.path === 'string' &&
+                !entry.path.includes('..') &&
+                (entry.size ?? 0) < 5_000_000
+            )
+            .map((entry) => entry.path as string);
+          break;
+        }
+      } catch {
+        // Try next branch
+      }
+    }
+
+    // Fallback: if GitHub tree API is rate-limited, query known raw paths directly on main
+    const isRelevantFile = (p: string): boolean => {
+      if (!/^[a-zA-Z0-9._/-]+$/.test(p) || p.includes('..')) return false;
+      if (p === 'site.json') return true;
+      if (/^data\/[^/]+\.json$/i.test(p)) {
+        return !/weightage\.json$/i.test(p);
+      }
+      if (/^mock\/[^/]+\.(json|js)$/i.test(p)) return true;
+      if (/^content\/.*(predicted|practice|mock|pyq|quiz|test).*\.md$/i.test(p)) return true;
+      return false;
+    };
+
+    const targetPaths =
+      treePaths.length > 0
+        ? treePaths.filter(isRelevantFile).slice(0, 24)
+        : [
+            'site.json',
+            'data/predicted-2027.json',
+            'data/pyq.json',
+            'mock/mock.js',
+            'content/predicted-2027.md',
+          ];
+
+    const safeBranch = /^[a-zA-Z0-9._-]+$/.test(resolvedBranch) ? resolvedBranch : 'main';
+    const rawBase = `https://raw.githubusercontent.com/${ARSHAN_OWNER}/${ARSHAN_REPO}/${safeBranch}/`;
+
+    const filesParsed: string[] = [];
+    const jsonQuestions: Question[] = [];
+    const mdQuestions: Question[] = [];
+    const jsQuestions: Question[] = [];
+    const pyqAnswerKeys: ArshanPyqKeyRecord[] = [];
+    const structuredJsonBasenames = new Set<string>();
+    const pendingMdFiles: Array<{ filePath: string; text: string }> = [];
+    let siteTitle = 'GATE CSE 2027';
+
+    // Fetch discovered raw files in parallel (zero GitHub REST API rate-limit burn)
+    const fetched = await Promise.allSettled(
+      targetPaths.map(async (filePath) => {
+        const url = `${rawBase}${filePath}`;
+        const r = await fetchWithTimeout(url, 15_000);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const text = await r.text();
+        if (text.length > 6_000_000) throw new Error('File exceeds 6MB safety cap');
+        return { filePath, text };
+      })
+    );
+
+    const getStemBasename = (p: string): string =>
+      p
+        .toLowerCase()
+        .replace(/^.*\//, '')
+        .replace(/\.(json|md|js)$/i, '');
+
+    for (const outcome of fetched) {
+      if (outcome.status !== 'fulfilled') continue;
+      const { filePath, text } = outcome.value;
+      const lower = filePath.toLowerCase();
+
+      if (lower === 'site.json') {
+        try {
+          const site = JSON.parse(text) as { title?: string };
+          if (typeof site?.title === 'string' && site.title.trim()) {
+            siteTitle = site.title.trim();
+          }
+          filesParsed.push(filePath);
+        } catch {
+          // Ignore malformed site.json
+        }
+        continue;
+      }
+
+      if (lower.endsWith('.json')) {
+        try {
+          const parsed: unknown = JSON.parse(text);
+          if (lower === 'data/pyq.json' || lower.endsWith('/pyq.json')) {
+            const { pyqAnswerKeys: keys, playablePyqs } = extractArshanPyqData(parsed, safeBranch);
+            pyqAnswerKeys.push(...keys);
+            jsonQuestions.push(...playablePyqs);
+            if (playablePyqs.length > 0) structuredJsonBasenames.add(getStemBasename(filePath));
+          } else {
+            const qs = normalizeArshanStructuredQuestions(parsed, filePath, safeBranch);
+            jsonQuestions.push(...qs);
+            if (qs.length > 0) structuredJsonBasenames.add(getStemBasename(filePath));
+          }
+          filesParsed.push(filePath);
+        } catch {
+          // Ignore non-question JSON files
+        }
+        continue;
+      }
+
+      if (lower.endsWith('.js')) {
+        const extracted = extractEmbeddedQuestionsFromJsSafe(text, filePath, safeBranch);
+        if (extracted.length > 0) {
+          jsQuestions.push(...extracted);
+        }
+        filesParsed.push(filePath);
+        continue;
+      }
+
+      if (lower.endsWith('.md')) {
+        pendingMdFiles.push({ filePath, text });
+      }
+    }
+
+    // Only parse Markdown files that do NOT already have an authoritative structured JSON source
+    for (const { filePath, text } of pendingMdFiles) {
+      if (structuredJsonBasenames.has(getStemBasename(filePath))) {
+        continue;
+      }
+      const extracted = extractQuestionsFromArshanMarkdown(text, filePath, safeBranch);
+      if (extracted.length > 0) {
+        mdQuestions.push(...extracted);
+      }
+      filesParsed.push(filePath);
+    }
+
+    // Prefer structured JSON over Markdown duplicates, then strictly deduplicate by ID & normalized text hash
+    const allPlayable = deduplicateQuestionPool([...jsonQuestions, ...jsQuestions, ...mdQuestions]);
+
+    if (allPlayable.length === 0 && pyqAnswerKeys.length === 0) {
+      if (arshanRepoCache) {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.send(arshanRepoCache.rawText);
+        return;
+      }
+      res.status(200).json({
+        ok: false,
+        message: 'Could not reach arshanalikhan/gate-cse right now. Serving cached bank.',
+      });
+      return;
+    }
+
+    const syncedAt = new Date().toISOString();
+    const predicted2027Count = allPlayable.filter((q) => q.sourceCategory === 'PREDICTED_2027').length;
+    const extraPracticeCount = allPlayable.filter((q) => q.sourceCategory === 'EXTRA_PRACTICE').length;
+    const pyqPlayableCount = allPlayable.filter((q) => q.sourceCategory === 'PYQ').length;
+    const withAnswersCount = allPlayable.filter((q) => questionHasAnswerKey(q)).length;
+
+    const envelope = JSON.stringify({
+      ok: true,
+      repo: `${ARSHAN_OWNER}/${ARSHAN_REPO}`,
+      sourceUrl: `https://github.com/${ARSHAN_OWNER}/${ARSHAN_REPO}`,
+      branch: safeBranch,
+      siteTitle,
+      syncedAt,
+      filesParsed,
+      stats: {
+        playableCount: allPlayable.length,
+        pyqPlayableCount,
+        pyqKeysCount: pyqAnswerKeys.length,
+        predicted2027Count,
+        extraPracticeCount,
+        withAnswersCount,
+      },
+      questions: allPlayable,
+      pyqAnswerKeys,
+    });
+
+    arshanRepoCache = {
+      branch: safeBranch,
+      syncedAt,
+      fetchedAtMs: now,
+      playableCount: allPlayable.length,
+      pyqKeysCount: pyqAnswerKeys.length,
+      rawText: envelope,
+    };
+
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.send(envelope);
   });
 
   /**

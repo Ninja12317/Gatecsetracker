@@ -31,8 +31,67 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap"
       rel="stylesheet"
     />
+    <script>
+      (function () {
+        try {
+          var VALID = {
+            brown: 1,
+            green: 1,
+            red: 1,
+            blue: 1,
+            teal: 1,
+            graphite: 1,
+            navy: 1,
+            olive: 1,
+          };
+          var mode = 'light';
+          var accent = 'brown';
+          var bootRaw = localStorage.getItem('gate27_theme_boot_v1');
+          if (bootRaw) {
+            var boot = JSON.parse(bootRaw);
+            if (boot && typeof boot === 'object') {
+              if (boot.mode === 'dark' || boot.mode === 'light' || boot.mode === 'system') {
+                mode = boot.mode;
+              }
+              if (boot.accent && VALID[boot.accent]) {
+                accent = boot.accent;
+              }
+            }
+          } else {
+            var stateRaw = localStorage.getItem('gate27_war_room_state_v2');
+            if (stateRaw) {
+              var st = JSON.parse(stateRaw);
+              if (st && st.settings) {
+                if (
+                  st.settings.themeMode === 'dark' ||
+                  st.settings.themeMode === 'light' ||
+                  st.settings.themeMode === 'system'
+                ) {
+                  mode = st.settings.themeMode;
+                }
+                if (st.settings.accentTheme && VALID[st.settings.accentTheme]) {
+                  accent = st.settings.accentTheme;
+                }
+              } else if (st && st.theme === 'dark') {
+                mode = 'dark';
+              }
+            }
+          }
+          var isDark =
+            mode === 'dark' ||
+            (mode === 'system' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var root = document.documentElement;
+          root.classList.toggle('dark', Boolean(isDark));
+          root.setAttribute('data-accent', accent);
+        } catch (_err) {
+          document.documentElement.setAttribute('data-accent', 'brown');
+        }
+      })();
+    </script>
   </head>
-  <body class="bg-[#FAF8F4] text-[#1C1613] dark:bg-[#130F0D] dark:text-[#F5F0E8] antialiased">
+  <body class="bg-[var(--canvas-bg)] text-[var(--ink-primary)] antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

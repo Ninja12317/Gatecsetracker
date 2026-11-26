@@ -62,6 +62,11 @@
           "type": "string",
           "enum": ["light", "dark", "system"]
         },
+        "accentTheme": {
+          "type": "string",
+          "enum": ["brown", "green", "red", "blue", "teal", "graphite", "navy", "olive"]
+        },
+        "simpleMode": { "type": "boolean" },
         "uiScale": {
           "type": "string",
           "enum": ["compact", "default", "comfortable"]
@@ -78,6 +83,7 @@
         "autoAddWrongToMistakes": { "type": "boolean" },
         "showLivePaceTimer": { "type": "boolean" },
         "enableKeyboardShortcuts": { "type": "boolean" },
+        "enableMobileSwipeNav": { "type": "boolean" },
         "bookmarkedQuestions": {
           "type": "array",
           "description": "Bounded list of up to 200 bookmarked question IDs."
@@ -837,6 +843,64 @@
         }
       },
       "required": ["ownerId", "packId", "name", "source", "cardCount", "cards", "createdAt", "updatedAt"]
+    },
+    "DailyProgressTracker": {
+      "title": "DailyProgressTracker",
+      "description": "Never-repeating Daily Mixed DPP and Daily 10-Min GA question history and per-day IST completion tracker.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "usedDailyDppIds": {
+          "type": "array",
+          "description": "Bounded list of seen Daily DPP question IDs across days."
+        },
+        "usedDailyGaIds": {
+          "type": "array",
+          "description": "Bounded list of seen Daily GA question IDs across days."
+        },
+        "dailyDppByDate": {
+          "type": "object",
+          "description": "Map of YYYY-MM-DD (IST) -> DailyTestRecord."
+        },
+        "dailyGaByDate": {
+          "type": "object",
+          "description": "Map of YYYY-MM-DD (IST) -> DailyTestRecord."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "usedDailyDppIds", "usedDailyGaIds", "dailyDppByDate", "dailyGaByDate", "updatedAt"]
+    },
+    "StandaloneRoughWork": {
+      "title": "StandaloneRoughWork",
+      "description": "Independent general rough-work scratchpad sheets isolated from per-question PYQ Studio sketches.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "activeSheetId": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "sheets": {
+          "type": "array",
+          "description": "Bounded list of up to 12 rough-work sheet maps."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "activeSheetId", "sheets", "updatedAt"]
     }
   },
   "firestore": {
@@ -903,6 +967,14 @@
     "/users/{userId}/vault_packs/{packId}": {
       "schema": { "$ref": "#/entities/VaultPack" },
       "description": "Bulk JSON imported and GitHub-synced Formula & Trap Vault packs synced across devices."
+    },
+    "/users/{userId}/daily_progress/{docId}": {
+      "schema": { "$ref": "#/entities/DailyProgressTracker" },
+      "description": "Never-repeating Daily DPP and Daily 10-Min GA progress tracker synced across devices."
+    },
+    "/users/{userId}/rough_work/{docId}": {
+      "schema": { "$ref": "#/entities/StandaloneRoughWork" },
+      "description": "Standalone general rough-work sketchpad sheets isolated from PYQ Studio sketches."
     }
   }
 }

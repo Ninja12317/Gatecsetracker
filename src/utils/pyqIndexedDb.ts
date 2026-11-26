@@ -11,6 +11,11 @@ export interface CachedGateRDataset {
   sourceUrl: string;
   count: number;
   questions: Question[];
+  gaterCount?: number;
+  arshanCount?: number;
+  enrichedCount?: number;
+  verifiedCount?: number;
+  arshanSyncedAt?: string;
 }
 
 function openCacheDb(): Promise<IDBDatabase> {

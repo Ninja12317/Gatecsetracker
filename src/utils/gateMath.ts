@@ -131,11 +131,23 @@ export function evaluateQuestionResponse(
     return { attempted: false, isCorrect: false, marksAwarded: 0, maxMarks };
   }
   const numeric = Number(raw);
-  if (Number.isNaN(numeric) || question.natAnswer === undefined) {
+  if (Number.isNaN(numeric)) {
     return { attempted: true, isCorrect: false, marksAwarded: 0, maxMarks };
   }
-  const tolerance = question.natTolerance ?? 0.01;
-  const isCorrect = Math.abs(numeric - question.natAnswer) <= tolerance + 1e-9;
+  let isCorrect = false;
+  if (
+    typeof question.natRangeMin === 'number' &&
+    typeof question.natRangeMax === 'number' &&
+    Number.isFinite(question.natRangeMin) &&
+    Number.isFinite(question.natRangeMax)
+  ) {
+    const low = Math.min(question.natRangeMin, question.natRangeMax);
+    const high = Math.max(question.natRangeMin, question.natRangeMax);
+    isCorrect = numeric >= low - 1e-9 && numeric <= high + 1e-9;
+  } else if (question.natAnswer !== undefined && Number.isFinite(question.natAnswer)) {
+    const tolerance = question.natTolerance ?? 0.01;
+    isCorrect = Math.abs(numeric - question.natAnswer) <= tolerance + 1e-9;
+  }
   return {
     attempted: true,
     isCorrect,
