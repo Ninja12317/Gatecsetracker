@@ -87,6 +87,7 @@ export default function App() {
   const [launchSketchpadSprintTrigger, setLaunchSketchpadSprintTrigger] = useState(0);
   const [exitPyqSessionTrigger, setExitPyqSessionTrigger] = useState(0);
   const [resetPyqStudioTabTrigger, setResetPyqStudioTabTrigger] = useState(0);
+  const [settingsFocusProfileToken, setSettingsFocusProfileToken] = useState(0);
   const [conceptDrillContext, setConceptDrillContext] = useState<ConceptDrillContext | null>(null);
   const [confirmExitTimedTestOpen, setConfirmExitTimedTestOpen] = useState(false);
 
@@ -176,6 +177,11 @@ export default function App() {
       setPdfToast((curr) => (curr === msg ? '' : curr));
     }, 4500);
   }, []);
+
+  const handleOpenProfileSettings = useCallback(() => {
+    setSettingsFocusProfileToken((n) => n + 1);
+    navigateTo('settings', { subContext: 'profile', label: 'Profile Settings' });
+  }, [navigateTo]);
 
   // Global keyboard shortcuts (Cmd/Ctrl+K, C for Calculator outside inputs, Escape)
   useEffect(() => {
@@ -554,6 +560,7 @@ export default function App() {
             contentWidth={contentWidth}
             simpleMode={simpleMode}
             user={store.user}
+            profile={store.state.profile}
             syncStatus={store.syncStatus}
             quotaNotice={store.quotaNotice}
             unresolvedMistakesCount={unresolvedMistakesCount}
@@ -765,21 +772,25 @@ export default function App() {
               authError={store.authError}
               gaterCount={store.gaterCount}
               gaterSyncStatus={store.gaterSyncStatus}
+              focusProfileToken={settingsFocusProfileToken}
               onSyncGateR={store.syncGateRFromRepo}
               onSignInGoogle={store.signInWithGoogle}
               onSignOut={store.signOut}
               onSetThemeMode={store.setThemeMode}
               onSetAccentTheme={store.setAccentTheme}
               onToggleSimpleMode={handleToggleSimpleMode}
+              onUpdateProfile={store.updateProfile}
               onUpdateSettings={store.updateSettings}
               onImportBackup={store.importFullBackup}
               onResetAll={store.resetAllData}
               onExportStudyReportPdf={handleExportStudyReportPdf}
               pwaInstalled={pwa.isInstalled}
+              pwaDismissed={pwa.isDismissed}
               pwaCanPrompt={pwa.canPromptNatively}
               isOnline={pwa.isOnline}
               swActive={pwa.swActive}
               onTriggerPwaInstall={() => void pwa.triggerInstall()}
+              onDismissPwaInstall={pwa.dismissInstall}
               onOpenPwaGuide={pwa.openGuide}
             />
           )}
@@ -888,6 +899,7 @@ export default function App() {
           onClose={() => setDrawerOpen(false)}
           activeView={activeView}
           onNavigate={(v) => navigateTo(v)}
+          onOpenProfileSettings={handleOpenProfileSettings}
           onOpenMistakeBucket={handleOpenMistakesBucket}
           onJumpFocusTimer={handleJumpToFocusTimer}
           onOpenCalculator={() => setCalculatorOpen((o) => !o)}
@@ -897,20 +909,16 @@ export default function App() {
           onSetLightDark={(mode) => store.setThemeMode(mode)}
           accentTheme={accentTheme}
           onSetAccentTheme={store.setAccentTheme}
+          onThemeSelectedToast={(name) => handlePdfDownloadSuccess(`Theme switched to ${name}`)}
           simpleMode={simpleMode}
           onToggleSimpleMode={handleToggleSimpleMode}
           user={store.user}
-          syncStatus={store.syncStatus}
+          profile={store.state.profile}
           onSignIn={store.signInWithGoogle}
           onSignOut={store.signOut}
-          gaterCount={store.gaterCount || store.allQuestions.length}
-          gaterSyncStatus={store.gaterSyncStatus}
           streakDays={streakDays}
           unresolvedMistakesCount={unresolvedMistakesCount}
           dueRevisionCount={srsDueCount}
-          pwaInstalled={pwa.isInstalled}
-          pwaCanPrompt={pwa.canPromptNatively}
-          onTriggerPwaInstall={() => void pwa.triggerInstall()}
         />
 
         <StandaloneSketchpadModal

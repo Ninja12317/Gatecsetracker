@@ -50,6 +50,13 @@ export function createInitialWarRoomState(): WarRoomState {
     version: 2,
     theme: 'light',
     settings: { ...DEFAULT_EXAM_SETTINGS },
+    profile: {
+      displayName: '',
+      targetGoal: '',
+      bio: '',
+      avatarDataUrl: '',
+      profileUpdatedAt: 0,
+    },
     lastAutopilotIstDate: '',
     lastTrapsIstDate: '',
     progress: createInitialProgress(),

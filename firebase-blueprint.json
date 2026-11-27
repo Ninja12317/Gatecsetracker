@@ -977,6 +977,43 @@
         "gradedCount", "gradedAttemptedCount", "pendingKeyCount", "correctCount",
         "wrongCount", "unattemptedCount", "penaltyMarks", "accuracyPct", "createdAt", "updatedAt"
       ]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Custom display name, target exam goal, short bio, and compressed client-side avatar data URL (<25KB) synced across devices.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "targetGoal": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "bio": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "avatarDataUrl": {
+          "type": "string",
+          "maxLength": 35000,
+          "pattern": "^data:image/(webp|jpeg|png);base64,[A-Za-z0-9+/=]+$"
+        },
+        "profileUpdatedAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "displayName", "targetGoal", "bio", "avatarDataUrl", "updatedAt"]
     }
   },
   "firestore": {
@@ -1055,6 +1092,10 @@
     "/users/{userId}/test_history/{testId}": {
       "schema": { "$ref": "#/entities/TestHistory" },
       "description": "Submitted PYQ/DPP/Concept Drill test logs with strict graded vs pending-key scoring."
+    },
+    "/users/{userId}/profile/{profileId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile details (display name, target goal, bio, and compressed <25KB avatar data URL)."
     }
   }
 }

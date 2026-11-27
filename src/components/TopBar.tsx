@@ -5,15 +5,17 @@ import {
   Search,
   ArrowLeft,
 } from 'lucide-react';
-import type { AuthUserSummary, ContentWidthMode, NavView, SyncStatus } from '../types';
+import type { AuthUserSummary, ContentWidthMode, NavView, SyncStatus, UserProfile } from '../types';
 import { useFocusTimer } from '../context/FocusTimerContext';
 import { VIEW_HEADER_TITLES } from '../utils/mobileNav';
+import { resolveEffectiveProfile } from '../utils/profileHelpers';
 
 interface TopBarProps {
   activeView: NavView;
   contentWidth: ContentWidthMode;
   simpleMode?: boolean;
   user: AuthUserSummary | null;
+  profile?: UserProfile;
   syncStatus: SyncStatus;
   quotaNotice: string;
   unresolvedMistakesCount: number;
@@ -43,6 +45,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   contentWidth,
   simpleMode = false,
   user,
+  profile,
   syncStatus,
   quotaNotice,
   unresolvedMistakesCount,
@@ -55,6 +58,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenCommandPalette,
   onOpenDrawer,
 }) => {
+  const effectiveProfile = resolveEffectiveProfile(profile, user);
   const visibleNav = simpleMode ? PRIMARY_NAV.filter((n) => n.core) : PRIMARY_NAV;
   const { status: focusStatus } = useFocusTimer();
   const isFocusRunning = focusStatus === 'running';
@@ -265,21 +269,21 @@ export const TopBar: React.FC<TopBarProps> = ({
               title={`Signed in as ${user.email} · Open menu`}
               className="hidden md:flex items-center gap-1.5 h-9 pl-1.5 pr-3 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] hover:border-[#C89216] press-tactile"
             >
-              {user.photoURL ? (
+              {effectiveProfile.avatarUrl ? (
                 <img
-                  src={user.photoURL}
-                  alt={user.displayName}
+                  src={effectiveProfile.avatarUrl}
+                  alt={effectiveProfile.displayName}
                   referrerPolicy="no-referrer"
                   className="h-6 w-6 rounded-full object-cover border border-[#E8E0D5] dark:border-[#2E2520]"
                 />
               ) : (
                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#6E261A] dark:bg-[#9E3E2E] text-[10px] font-bold text-white">
-                  {user.displayName.charAt(0).toUpperCase()}
+                  {effectiveProfile.initials}
                 </span>
               )}
               <span className={`h-2 w-2 rounded-full ${syncDotColor}`} aria-hidden="true" />
               <span className="text-xs font-medium text-[#1C1613] dark:text-[#F5F0E8] max-w-[88px] truncate">
-                {user.displayName.split(' ')[0]}
+                {effectiveProfile.displayName.split(' ')[0]}
               </span>
             </button>
           ) : (

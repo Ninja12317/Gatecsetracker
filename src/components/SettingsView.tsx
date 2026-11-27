@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Download,
   Upload,
@@ -24,6 +24,10 @@ import {
   CheckCircle2,
   Palette,
   EyeOff,
+  User,
+  Camera,
+  Trash2,
+  X,
 } from 'lucide-react';
 import type {
   AccentThemeId,
@@ -34,6 +38,7 @@ import type {
   SyncStatus,
   ThemeMode,
   UiScaleMode,
+  UserProfile,
   WarRoomState,
 } from '../types';
 import { validateBackupJson } from '../utils/gateMath';
@@ -44,6 +49,14 @@ import {
 } from '../utils/examPolish';
 import { getGateRCacheSizeBytes } from '../utils/pyqIndexedDb';
 import { ACCENT_THEMES, normalizeAccentThemeId } from '../utils/themeEngine';
+import {
+  PROFILE_BIO_MAX,
+  PROFILE_DISPLAY_NAME_MAX,
+  PROFILE_TARGET_GOAL_MAX,
+  compressAvatarFileToDataUrl,
+  estimateDataUrlBytes,
+  resolveEffectiveProfile,
+} from '../utils/profileHelpers';
 
 interface SettingsViewProps {
   state: WarRoomState;
@@ -52,25 +65,29 @@ interface SettingsViewProps {
   authError: string;
   gaterCount: number;
   gaterSyncStatus: GateRSyncStatus;
+  focusProfileToken?: number;
   onSyncGateR: (forceRefresh?: boolean) => Promise<{ ok: boolean; count: number; message: string }>;
   onSignInGoogle: () => void;
   onSignOut: () => void;
   onSetThemeMode: (mode: ThemeMode) => void;
   onSetAccentTheme: (accent: AccentThemeId) => void;
   onToggleSimpleMode: (enabled: boolean) => void;
+  onUpdateProfile: (patch: Partial<UserProfile>) => void;
   onUpdateSettings: (patch: Partial<ExamSettings>) => void;
   onImportBackup: (imported: Partial<WarRoomState>) => void;
   onResetAll: () => void;
   onExportStudyReportPdf: () => void;
   pwaInstalled: boolean;
+  pwaDismissed: boolean;
   pwaCanPrompt: boolean;
   isOnline: boolean;
   swActive: boolean;
   onTriggerPwaInstall: () => void;
+  onDismissPwaInstall: () => void;
   onOpenPwaGuide: () => void;
 }
 
-type SettingsTab = 'exam' | 'display' | 'study' | 'data' | 'app';
+type SettingsTab = 'profile' | 'exam' | 'display' | 'study' | 'data' | 'app';
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   state,
@@ -79,24 +96,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   authError,
   gaterCount,
   gaterSyncStatus,
+  focusProfileToken = 0,
   onSyncGateR,
   onSignInGoogle,
   onSignOut,
   onSetThemeMode,
   onSetAccentTheme,
   onToggleSimpleMode,
+  onUpdateProfile,
   onUpdateSettings,
   onImportBackup,
   onResetAll,
   onExportStudyReportPdf,
   pwaInstalled,
+  pwaDismissed,
   pwaCanPrompt,
   isOnline,
   swActive,
   onTriggerPwaInstall,
+  onDismissPwaInstall,
   onOpenPwaGuide,
 }) => {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('exam');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
+
+  const effectiveProfile = resolveEffectiveProfile(state.profile, user);
+  const [profileDisplayName, setProfileDisplayName] = useState(
+    () => state.profile?.displayName || user?.displayName || ''
+  );
+  const [profileTargetGoal, setProfileTargetGoal] = useState(
+    () => state.profile?.targetGoal || ''
+  );
+  const [profileBio, setProfileBio] = useState(() => state.profile?.bio || '');
+  const [profileAvatarDraft, setProfileAvatarDraft] = useState(
+    () => state.profile?.avatarDataUrl || ''
+  );
+  const [avatarStatus, setAvatarStatus] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
+  const [avatarProcessing, setAvatarProcessing] = useState(false);
+
   const currentDatePart = state.settings.targetDateIso.slice(0, 10);
   const [dateInput, setDateInput] = useState(currentDatePart);
   const [shiftInput, setShiftInput] = useState<ExamSettings['shift']>(state.settings.shift);
@@ -121,6 +158,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [resyncFeedback, setResyncFeedback] = useState('');
 
   useEffect(() => {
+    if (focusProfileToken > 0) {
+      setActiveTab('profile');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [focusProfileToken]);
+
+  useEffect(() => {
+    setProfileDisplayName(state.profile?.displayName || user?.displayName || '');
+    setProfileTargetGoal(state.profile?.targetGoal || '');
+    setProfileBio(state.profile?.bio || '');
+    setProfileAvatarDraft(state.profile?.avatarDataUrl || '');
+  }, [
+    state.profile?.displayName,
+    state.profile?.targetGoal,
+    state.profile?.bio,
+    state.profile?.avatarDataUrl,
+    user?.displayName,
+  ]);
+
+  useEffect(() => {
     let active = true;
     void getGateRCacheSizeBytes().then((info) => {
       if (active) setCacheInfo(info);
@@ -133,6 +190,50 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const showSaved = (msg: string) => {
     setSavedNotice(msg);
     window.setTimeout(() => setSavedNotice(''), 2600);
+  };
+
+  const handleAvatarFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAvatarProcessing(true);
+    setAvatarStatus(null);
+    try {
+      const compressed = await compressAvatarFileToDataUrl(file);
+      setProfileAvatarDraft(compressed.dataUrl);
+      onUpdateProfile({ avatarDataUrl: compressed.dataUrl });
+      const kb = (compressed.byteSize / 1024).toFixed(1);
+      setAvatarStatus({
+        type: 'ok',
+        msg: `Photo updated (${kb} KB · 160×160).`,
+      });
+      showSaved('Profile photo updated.');
+    } catch (err) {
+      setAvatarStatus({
+        type: 'err',
+        msg: err instanceof Error ? err.message : 'Unable to process selected photo.',
+      });
+    } finally {
+      setAvatarProcessing(false);
+    }
+  };
+
+  const handleRemoveAvatar = () => {
+    setProfileAvatarDraft('');
+    onUpdateProfile({ avatarDataUrl: '' });
+    setAvatarStatus({ type: 'ok', msg: 'Custom profile photo removed.' });
+    showSaved('Profile photo removed.');
+  };
+
+  const handleSaveProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    onUpdateProfile({
+      displayName: profileDisplayName.trim(),
+      targetGoal: profileTargetGoal.trim(),
+      bio: profileBio.trim(),
+      avatarDataUrl: profileAvatarDraft,
+    });
+    showSaved('Profile updated live across your workspace.');
   };
 
   const applyDateAndShift = (isoDate: string, shift: ExamSettings['shift']) => {
@@ -213,6 +314,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const tabs: Array<{ id: SettingsTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+    { id: 'profile', label: 'Profile', icon: User },
     { id: 'exam', label: 'Exam & Countdown', icon: CalendarClock },
     { id: 'display', label: 'Display & Navigation', icon: Monitor },
     { id: 'study', label: 'Study & Exam', icon: Sliders },
@@ -279,6 +381,263 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           })}
         </div>
       </section>
+
+      {/* TAB 0: Profile Settings + Account Logout */}
+      {activeTab === 'profile' && (
+        <div className="space-y-5" data-testid="settings-profile-panel">
+          <section
+            data-testid="profile-settings-card"
+            className="rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-6 shadow-warm space-y-6"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <User className="h-4 w-4 text-[#6E261A] dark:text-[#E0A92E]" />
+                <div>
+                  <h2 className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8]">
+                    Profile Settings
+                  </h2>
+                  <p className="text-xs text-[#61554D] dark:text-[#A99B8E] mt-0.5">
+                    Personalize your avatar, display name, and GATE 2027 goal. Updates apply live across the menu drawer and header.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Avatar Upload & Preview Row */}
+            <div className="rounded-[22px] bg-[#FAF8F4] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-4 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => avatarFileInputRef.current?.click()}
+                  data-testid="profile-avatar-preview"
+                  aria-label="Upload or change profile picture"
+                  className="relative group h-20 w-20 rounded-full overflow-hidden border-2 border-[#C89216]/55 bg-[#6E261A] dark:bg-[#9E3E2E] text-white flex items-center justify-center shadow-sm shrink-0 press-tactile"
+                >
+                  {profileAvatarDraft || effectiveProfile.avatarUrl ? (
+                    <img
+                      src={profileAvatarDraft || effectiveProfile.avatarUrl || ''}
+                      alt={effectiveProfile.displayName}
+                      data-testid="profile-avatar-img"
+                      referrerPolicy="no-referrer"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="font-display text-xl font-bold tracking-tight">
+                      {effectiveProfile.initials}
+                    </span>
+                  )}
+                  <span className="absolute inset-0 bg-[#1C1613]/45 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <Camera className="h-5 w-5 text-white" />
+                  </span>
+                </button>
+
+                <div className="min-w-0 space-y-1">
+                  <p className="font-display text-sm font-bold text-[#1C1613] dark:text-[#F5F0E8] truncate">
+                    {profileDisplayName.trim() || effectiveProfile.displayName}
+                  </p>
+                  <p className="text-xs text-[#61554D] dark:text-[#A99B8E]">
+                    {profileAvatarDraft
+                      ? `Custom photo ready (${(estimateDataUrlBytes(profileAvatarDraft) / 1024).toFixed(1)} KB)`
+                      : 'Square portrait auto-resized cleanly to 160×160.'}
+                  </p>
+                  {avatarStatus && (
+                    <p
+                      data-testid="profile-avatar-status"
+                      className={`text-[11px] font-semibold flex items-center gap-1 ${
+                        avatarStatus.type === 'ok'
+                          ? 'text-[#2E5E3E] dark:text-[#7BB88F]'
+                          : 'text-[#B83227] dark:text-[#F08A80]'
+                      }`}
+                    >
+                      {avatarStatus.type === 'ok' ? (
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                      ) : (
+                        <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                      )}
+                      {avatarStatus.msg}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <input
+                  ref={avatarFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  data-testid="profile-avatar-file-input"
+                  onChange={(e) => void handleAvatarFileSelected(e)}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  disabled={avatarProcessing}
+                  data-testid="profile-upload-photo-btn"
+                  onClick={() => avatarFileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 h-9 px-4 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] text-white text-xs font-semibold press-tactile disabled:opacity-60"
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                  {avatarProcessing
+                    ? 'Processing...'
+                    : profileAvatarDraft
+                    ? 'Change Photo'
+                    : 'Upload Photo'}
+                </button>
+                {profileAvatarDraft && (
+                  <button
+                    type="button"
+                    data-testid="profile-remove-photo-btn"
+                    onClick={handleRemoveAvatar}
+                    className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full border border-[#EBC7C3] dark:border-[#5E2823] bg-[#FFFFFF] dark:bg-[#1C1714] text-[#B83227] dark:text-[#F08A80] hover:bg-[#FBEAE8] dark:hover:bg-[#3A1E1B] text-xs font-semibold press-tactile"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Editable Profile Fields */}
+            <form onSubmit={handleSaveProfile} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label
+                    htmlFor="profile-display-name"
+                    className="block text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] mb-1.5"
+                  >
+                    Display Name
+                  </label>
+                  <input
+                    id="profile-display-name"
+                    data-testid="profile-display-name-input"
+                    type="text"
+                    maxLength={PROFILE_DISPLAY_NAME_MAX}
+                    value={profileDisplayName}
+                    onChange={(e) => setProfileDisplayName(e.target.value)}
+                    placeholder="e.g., Nihal Pawar"
+                    className="w-full h-11 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] px-4 text-sm text-[#1C1613] dark:text-[#F5F0E8] placeholder:text-[#8C7E75] focus:outline-none focus:border-[#6E261A] dark:focus:border-[#E0A92E]"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="profile-target-goal"
+                    className="block text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] mb-1.5"
+                  >
+                    Target Exam / Goal
+                  </label>
+                  <input
+                    id="profile-target-goal"
+                    data-testid="profile-target-goal-input"
+                    type="text"
+                    maxLength={PROFILE_TARGET_GOAL_MAX}
+                    value={profileTargetGoal}
+                    onChange={(e) => setProfileTargetGoal(e.target.value)}
+                    placeholder="e.g., GATE CSE 2027 · AIR < 100"
+                    className="w-full h-11 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] px-4 text-sm text-[#1C1613] dark:text-[#F5F0E8] placeholder:text-[#8C7E75] focus:outline-none focus:border-[#6E261A] dark:focus:border-[#E0A92E]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label
+                    htmlFor="profile-bio"
+                    className="block text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8]"
+                  >
+                    Short Bio / College / Note{' '}
+                    <span className="font-normal text-[#61554D] dark:text-[#A99B8E]">(Optional)</span>
+                  </label>
+                  <span className="font-mono text-[10px] tabular-nums text-[#8C7E75] dark:text-[#9A8B7E]">
+                    {profileBio.length}/{PROFILE_BIO_MAX}
+                  </span>
+                </div>
+                <textarea
+                  id="profile-bio"
+                  data-testid="profile-bio-input"
+                  rows={3}
+                  maxLength={PROFILE_BIO_MAX}
+                  value={profileBio}
+                  onChange={(e) => setProfileBio(e.target.value)}
+                  placeholder="e.g., Final-year CSE · Focusing on OS, DBMS, and COA daily sprints"
+                  className="w-full rounded-[20px] border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] px-4 py-3 text-sm text-[#1C1613] dark:text-[#F5F0E8] placeholder:text-[#8C7E75] focus:outline-none focus:border-[#6E261A] dark:focus:border-[#E0A92E] resize-none"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <p className="text-[11px] text-[#61554D] dark:text-[#A99B8E]">
+                  Saved locally and synced automatically whenever you are signed in.
+                </p>
+                <button
+                  type="submit"
+                  data-testid="save-profile-btn"
+                  className="inline-flex items-center gap-2 h-10 px-6 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] text-white text-xs font-semibold shadow-sm press-tactile"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  Save Profile
+                </button>
+              </div>
+            </form>
+          </section>
+
+          {/* Account & Log Out Card directly below Profile Settings */}
+          <section
+            data-testid="settings-account-logout-card"
+            className="rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-6 shadow-warm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+          >
+            <div className="flex items-start gap-3 min-w-0">
+              <div className="h-10 w-10 rounded-full bg-[#FAF8F4] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520] flex items-center justify-center shrink-0">
+                <Cloud className="h-4 w-4 text-[#6E261A] dark:text-[#E0A92E]" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8]">
+                  Account &amp; Sync
+                </h2>
+                {user ? (
+                  <p className="text-xs text-[#61554D] dark:text-[#A99B8E] mt-0.5 truncate">
+                    Signed in as <span className="font-semibold text-[#1C1613] dark:text-[#F5F0E8]">{user.email}</span> ·{' '}
+                    <span className="text-[#2E5E3E] dark:text-[#7BB88F] font-semibold">
+                      {syncStatus === 'synced' ? 'Synced' : syncStatus === 'connecting' ? 'Connecting...' : 'Active'}
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-xs text-[#61554D] dark:text-[#A99B8E] mt-0.5">
+                    Using local device workspace. Sign in with Google to sync your profile, syllabus, and mocks across devices.
+                  </p>
+                )}
+                {authError && (
+                  <p className="mt-1.5 text-xs text-[#B83227] dark:text-[#F08A80] flex items-center gap-1">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    {authError}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {user ? (
+              <button
+                type="button"
+                data-testid="settings-logout-btn"
+                onClick={onSignOut}
+                className="inline-flex items-center justify-center gap-1.5 h-10 px-5 rounded-full border border-[#EBC7C3] dark:border-[#5E2823] bg-[#FBEAE8] dark:bg-[#3A1E1B] hover:bg-[#F5D6D2] dark:hover:bg-[#4B2521] text-xs font-semibold text-[#B83227] dark:text-[#F08A80] shrink-0 press-tactile"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Log Out
+              </button>
+            ) : (
+              <button
+                type="button"
+                data-testid="settings-signin-btn"
+                onClick={onSignInGoogle}
+                className="inline-flex items-center justify-center gap-1.5 h-10 px-5 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] text-white text-xs font-semibold shrink-0 press-tactile"
+              >
+                <LogIn className="h-3.5 w-3.5" />
+                Sign In with Google
+              </button>
+            )}
+          </section>
+        </div>
+      )}
 
       {/* TAB 1: Exam & Countdown + Cloud Sync */}
       {activeTab === 'exam' && (
@@ -1080,37 +1439,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {activeTab === 'app' && (
         <div className="space-y-5" data-testid="settings-app-offline-panel">
           <section className="rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-6 shadow-warm space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <img
-                  src="/icon.svg"
-                  alt="GATE CSE '27 App Icon"
-                  className="h-16 w-16 rounded-[18px] shadow-md border border-[#C89216]/45 shrink-0"
-                />
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8]">
-                      Install GATE &apos;27 App (PWA)
-                    </h2>
-                    {pwaInstalled ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#EBF5EE] dark:bg-[#152B1D] border border-[#B9D6C2] dark:border-[#254A33] px-2.5 py-0.5 text-[11px] font-bold text-[#2E5E3E] dark:text-[#7BB88F]">
-                        <CheckCircle2 className="w-3 h-3" />
-                        Installed as App
-                      </span>
-                    ) : (
+            {!pwaInstalled && !pwaDismissed ? (
+              <div
+                data-testid="settings-pwa-install-card"
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-[#EFE9DF] dark:border-[#2E2520]"
+              >
+                <div className="flex items-center gap-4">
+                  <img
+                    src="/icon.svg"
+                    alt="GATE CSE '27 App Icon"
+                    className="h-16 w-16 rounded-[18px] shadow-md border border-[#C89216]/45 shrink-0"
+                  />
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8]">
+                        Install GATE &apos;27 App
+                      </h2>
                       <span className="inline-flex items-center gap-1 rounded-full bg-[#FDF6E3] dark:bg-[#2C2215] border border-[#EED89A] dark:border-[#5C441B] px-2.5 py-0.5 text-[11px] font-bold text-[#8E620C] dark:text-[#E0A92E]">
                         Android · iOS · Desktop
                       </span>
-                    )}
+                    </div>
+                    <p className="text-xs text-[#61554D] dark:text-[#A99B8E] mt-1">
+                      Launch GATE &apos;27 full-screen without browser bars, with offline PYQs, Focus Timer, and home-screen shortcuts.
+                    </p>
                   </div>
-                  <p className="text-xs text-[#61554D] dark:text-[#A99B8E] mt-1">
-                    Launch GATE &apos;27 full-screen without browser chrome, with offline-cached GateR PYQs, Focus Timer, and quick home-screen shortcuts.
-                  </p>
                 </div>
-              </div>
 
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
-                {!pwaInstalled && (
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <button
                     type="button"
                     data-testid="settings-install-app-btn"
@@ -1120,19 +1475,53 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <Download className="w-3.5 h-3.5" />
                     {pwaCanPrompt ? "Install GATE '27 Now" : "Install GATE '27 App"}
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={onOpenPwaGuide}
-                  className="inline-flex items-center gap-1.5 h-10 px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#61554D] dark:text-[#D8CBB8] hover:border-[#C89216] press-tactile"
-                >
-                  Install Guide
-                </button>
+                  <button
+                    type="button"
+                    onClick={onOpenPwaGuide}
+                    className="inline-flex items-center gap-1.5 h-10 px-4 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#61554D] dark:text-[#D8CBB8] hover:border-[#C89216] press-tactile"
+                  >
+                    Install Guide
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="settings-dismiss-pwa-btn"
+                    onClick={onDismissPwaInstall}
+                    aria-label="Dismiss install banner"
+                    title="Dismiss install prompt"
+                    className="inline-flex items-center justify-center h-10 w-10 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-[#61554D] dark:text-[#A99B8E] hover:text-[#1C1613] dark:hover:text-[#F5F0E8] press-tactile"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <Smartphone className="h-4 w-4 text-[#6E261A] dark:text-[#E0A92E]" />
+                  <h2 className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8]">
+                    App &amp; Offline Readiness
+                  </h2>
+                  {pwaInstalled && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-[#EBF5EE] dark:bg-[#152B1D] border border-[#B9D6C2] dark:border-[#254A33] px-2.5 py-0.5 text-[11px] font-bold text-[#2E5E3E] dark:text-[#7BB88F]">
+                      <CheckCircle2 className="w-3 h-3" />
+                      Installed
+                    </span>
+                  )}
+                </div>
+                {!pwaInstalled && (
+                  <button
+                    type="button"
+                    onClick={onOpenPwaGuide}
+                    className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#61554D] dark:text-[#D8CBB8] hover:border-[#C89216] press-tactile"
+                  >
+                    Install Guide
+                  </button>
+                )}
+              </div>
+            )}
 
-            {/* Live Offline & PWA Readiness Telemetry */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-[#EFE9DF] dark:border-[#2E2520]">
+            {/* Live Offline Status */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="rounded-[20px] bg-[#FAF8F4] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520] p-4">
                 <p className="text-[10px] uppercase tracking-wider font-semibold text-[#61554D] dark:text-[#A99B8E]">
                   Network Status
@@ -1154,16 +1543,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
               <div className="rounded-[20px] bg-[#FAF8F4] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520] p-4">
                 <p className="text-[10px] uppercase tracking-wider font-semibold text-[#61554D] dark:text-[#A99B8E]">
-                  Offline Shell (Service Worker)
+                  Offline Workspace
                 </p>
                 <p className="mt-1.5 text-sm font-bold text-[#6E261A] dark:text-[#E0A92E]">
-                  {swActive ? 'Active & Caching' : 'Ready on Standalone URL'}
+                  {swActive ? 'Active & Ready Offline' : 'Ready on Standalone URL'}
                 </p>
               </div>
 
               <div className="rounded-[20px] bg-[#FAF8F4] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520] p-4">
                 <p className="text-[10px] uppercase tracking-wider font-semibold text-[#61554D] dark:text-[#A99B8E]">
-                  Offline GateR PYQ Bank
+                  Offline Question Bank
                 </p>
                 <p className="mt-1.5 font-mono text-sm font-bold tabular-nums text-[#1C1613] dark:text-[#F5F0E8]">
                   {Math.max(gaterCount, cacheInfo.count).toLocaleString()} PYQs ({formatBytesCompact(cacheInfo.bytes)})

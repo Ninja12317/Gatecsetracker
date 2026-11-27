@@ -42,6 +42,7 @@ import type {
   TipItem,
   TopicStatus,
   TrapSourceType,
+  UserProfile,
   VaultCard,
   VaultPack,
   VerifiedAnswerRecord,
@@ -120,11 +121,35 @@ import {
   parseSerializedResponse,
   recalculateTestHistoryEntry,
 } from '../utils/testScoringEngine';
+import {
+  createEmptyUserProfile,
+  sanitizeUserProfile,
+  shouldApplyRemoteProfile,
+} from '../utils/profileHelpers';
 
 const STORAGE_KEY = 'gate27_war_room_state_v2';
 const STANDALONE_ROUGH_WORK_KEY = 'standalone_rough_work';
+const USER_PROFILE_STORAGE_KEY = 'gate27_user_profile_v1';
 const SUBJECT_COOLDOWN_MS = 45_000;
 const TRAPS_COOLDOWN_MS = 10_000;
+
+function readLocalUserProfile(): UserProfile {
+  try {
+    const raw = localStorage.getItem(USER_PROFILE_STORAGE_KEY);
+    if (!raw) return createEmptyUserProfile();
+    return sanitizeUserProfile(JSON.parse(raw));
+  } catch {
+    return createEmptyUserProfile();
+  }
+}
+
+function writeLocalUserProfile(profile: UserProfile): void {
+  try {
+    localStorage.setItem(USER_PROFILE_STORAGE_KEY, JSON.stringify(sanitizeUserProfile(profile)));
+  } catch {
+    // ignore localStorage quota errors
+  }
+}
 
 function createDefaultStandaloneRoughWork(): StandaloneRoughWorkState {
   const nowIso = new Date().toISOString();
@@ -180,12 +205,14 @@ function sanitizeDocId(raw: string): string {
 
 function loadLocalState(): WarRoomState {
   const localAccent = readLocalAccentSelection();
+  const localProfile = readLocalUserProfile();
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
       const initial = createInitialWarRoomState();
       return {
         ...initial,
+        profile: localProfile,
         settings: {
           ...initial.settings,
           accentTheme: localAccent.accentTheme,
@@ -203,10 +230,17 @@ function loadLocalState(): WarRoomState {
       localAccent.accentUpdatedAt,
       parseAccentUpdatedAt(parsed.settings?.accentUpdatedAt)
     );
+    const parsedProfile = sanitizeUserProfile(parsed.profile);
+    const resolvedProfile =
+      (localProfile.profileUpdatedAt ?? 0) >= (parsedProfile.profileUpdatedAt ?? 0) &&
+      (localProfile.displayName || localProfile.avatarDataUrl || localProfile.targetGoal || localProfile.bio)
+        ? localProfile
+        : parsedProfile;
     const assembled: WarRoomState = {
       ...initial,
       ...parsed,
       theme: resolvedTheme,
+      profile: resolvedProfile,
       settings: {
         ...initial.settings,
         ...(parsed.settings ?? {}),
@@ -252,6 +286,7 @@ function loadLocalState(): WarRoomState {
     const initial = createInitialWarRoomState();
     return {
       ...initial,
+      profile: localProfile,
       settings: {
         ...initial.settings,
         accentTheme: localAccent.accentTheme,
@@ -880,10 +915,12 @@ export function useWarRoomStore() {
         }
         metaDocExistsRef.current = true;
 
-        // Reset in-memory state cleanly for Firestore docs while strictly preserving active local theme (zero snap-back to 'brown')
+        // Reset in-memory state cleanly for Firestore docs while strictly preserving active local theme & profile
         const latestLocalAccent = readLocalAccentSelection();
+        const latestLocalProfile = readLocalUserProfile();
         const freshForUser = createInitialWarRoomState();
         freshForUser.theme = preservedTheme;
+        freshForUser.profile = latestLocalProfile;
         freshForUser.settings.themeMode = preservedThemeMode;
         freshForUser.settings.accentTheme = latestLocalAccent.accentTheme;
         freshForUser.settings.accentUpdatedAt = latestLocalAccent.accentUpdatedAt;
@@ -1596,6 +1633,25 @@ export function useWarRoomStore() {
               setState((prev) => ({ ...prev, testHistory: entries }));
             },
             (err) => handleFirestoreError(err, OperationType.LIST, `users/${uid}/test_history`)
+          )
+        );
+
+        // Real-time Profile listener (/users/{uid}/profile/main)
+        const profileRef = doc(db, 'users', uid, 'profile', 'main');
+        unsubscribes.push(
+          onSnapshot(
+            profileRef,
+            (snap) => {
+              if (!snap.exists()) return;
+              if (snap.metadata.hasPendingWrites) return;
+              const remoteProfile = sanitizeUserProfile(snap.data());
+              const currentLocal = stateRef.current.profile ?? readLocalUserProfile();
+              if (shouldApplyRemoteProfile(currentLocal, remoteProfile)) {
+                writeLocalUserProfile(remoteProfile);
+                setState((prev) => ({ ...prev, profile: remoteProfile }));
+              }
+            },
+            (err) => handleFirestoreError(err, OperationType.GET, `users/${uid}/profile/main`)
           )
         );
       } catch (err) {
@@ -3453,6 +3509,47 @@ export function useWarRoomStore() {
     }
   }, []);
 
+  const updateProfile = useCallback((patch: Partial<UserProfile>) => {
+    const prevProfile = stateRef.current.profile ?? readLocalUserProfile();
+    const nextProfile = sanitizeUserProfile({
+      ...prevProfile,
+      ...patch,
+      profileUpdatedAt: Date.now(),
+    });
+
+    writeLocalUserProfile(nextProfile);
+    setState((prev) => ({
+      ...prev,
+      profile: nextProfile,
+    }));
+
+    const uid = userRef.current?.uid;
+    if (uid) {
+      const profilePath = `users/${uid}/profile/main`;
+      const profilePayload = {
+        ownerId: uid,
+        displayName: nextProfile.displayName,
+        targetGoal: nextProfile.targetGoal,
+        bio: nextProfile.bio,
+        avatarDataUrl: nextProfile.avatarDataUrl,
+        profileUpdatedAt: nextProfile.profileUpdatedAt ?? Date.now(),
+        updatedAt: serverTimestamp(),
+      };
+      setDoc(doc(db, 'users', uid, 'profile', 'main'), profilePayload, { merge: true }).catch((err) =>
+        handleFirestoreError(err, OperationType.WRITE, profilePath)
+      );
+
+      if (nextProfile.displayName) {
+        updateDoc(doc(db, 'users', uid), {
+          displayName: nextProfile.displayName.slice(0, 120),
+          updatedAt: serverTimestamp(),
+        }).catch(() => {
+          // root displayName sync is best-effort
+        });
+      }
+    }
+  }, []);
+
   const getOrCreateTodayDailyDpp = useCallback((): {
     todayIst: string;
     record: DailyTestRecord;
@@ -3985,6 +4082,7 @@ export function useWarRoomStore() {
     addMockTest,
     updateMockTest,
     deleteMockTest,
+    updateProfile,
     updateSettings,
     importFullBackup,
     resetAllData,

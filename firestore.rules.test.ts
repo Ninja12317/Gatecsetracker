@@ -40,9 +40,10 @@ test('Firestore rules cover every collection in firebase-blueprint.json', () => 
     'daily_progress/{docId}',
     'rough_work/{docId}',
     'test_history/{testId}',
+    'profile/{profileId}',
   ];
 
-  assert.equal(Object.keys(blueprint.firestore).length, 19);
+  assert.equal(Object.keys(blueprint.firestore).length, 20);
   for (const sub of subcollections) {
     assert.ok(rules.includes(`match /${sub}`), `Missing match block for /${sub}`);
   }
@@ -91,4 +92,9 @@ test('Dirty Dozen security assertions are enforced in rules', () => {
   assert.ok(rules.includes('function isValidTestHistory('));
   assert.ok(rules.includes('function isValidMockTest('));
   assert.ok(rules.includes('&& isValidMockTest(incoming(), userId)'));
+
+  // 10. User profile avatar size ceiling and data URL format guard
+  assert.ok(rules.includes('function isValidUserProfile('));
+  assert.ok(rules.includes('data.avatarDataUrl.size() <= 35000'));
+  assert.ok(rules.includes('^data:image/(webp|jpeg|png);base64,[A-Za-z0-9+/=]+$'));
 });

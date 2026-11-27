@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   X,
   LayoutDashboard,
@@ -19,19 +19,16 @@ import {
   LogIn,
   LogOut,
   Flame,
-  Database,
-  CheckCircle2,
-  CloudOff,
-  Download,
-  Smartphone,
   FlaskConical,
   Check,
   Palette,
   EyeOff,
+  ChevronRight,
 } from 'lucide-react';
-import type { AccentThemeId, AuthUserSummary, GateRSyncStatus, NavView, SyncStatus } from '../types';
+import type { AccentThemeId, AuthUserSummary, NavView, UserProfile } from '../types';
 import { GATE_2027_MILESTONES } from '../utils/examPolish';
 import { ACCENT_THEMES } from '../utils/themeEngine';
+import { resolveEffectiveProfile } from '../utils/profileHelpers';
 import { useFocusTimer } from '../context/FocusTimerContext';
 
 interface SlideOverDrawerProps {
@@ -39,6 +36,7 @@ interface SlideOverDrawerProps {
   onClose: () => void;
   activeView: NavView;
   onNavigate: (view: NavView) => void;
+  onOpenProfileSettings: () => void;
   onOpenMistakeBucket: () => void;
   onJumpFocusTimer: () => void;
   onOpenCalculator: () => void;
@@ -48,20 +46,16 @@ interface SlideOverDrawerProps {
   onSetLightDark: (mode: 'light' | 'dark') => void;
   accentTheme: AccentThemeId;
   onSetAccentTheme: (accent: AccentThemeId) => void;
+  onThemeSelectedToast?: (themeName: string) => void;
   simpleMode: boolean;
   onToggleSimpleMode: (enabled: boolean) => void;
   user: AuthUserSummary | null;
-  syncStatus: SyncStatus;
+  profile?: UserProfile;
   onSignIn: () => void;
   onSignOut: () => void;
-  gaterCount: number;
-  gaterSyncStatus: GateRSyncStatus;
   streakDays: number;
   unresolvedMistakesCount: number;
   dueRevisionCount: number;
-  pwaInstalled: boolean;
-  pwaCanPrompt: boolean;
-  onTriggerPwaInstall: () => void;
 }
 
 export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
@@ -69,6 +63,7 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
   onClose,
   activeView,
   onNavigate,
+  onOpenProfileSettings,
   onOpenMistakeBucket,
   onJumpFocusTimer,
   onOpenCalculator,
@@ -78,31 +73,56 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
   onSetLightDark,
   accentTheme,
   onSetAccentTheme,
+  onThemeSelectedToast,
   simpleMode,
   onToggleSimpleMode,
   user,
-  syncStatus,
+  profile,
   onSignIn,
   onSignOut,
-  gaterCount,
-  gaterSyncStatus,
   streakDays,
   unresolvedMistakesCount,
   dueRevisionCount,
-  pwaInstalled,
-  pwaCanPrompt,
-  onTriggerPwaInstall,
 }) => {
   const { status: focusStatus } = useFocusTimer();
+  const [palettePopoverOpen, setPalettePopoverOpen] = useState(false);
+  const palettePopoverRef = useRef<HTMLDivElement>(null);
+
+  const effectiveProfile = resolveEffectiveProfile(profile, user);
+  const activeAccentMeta =
+    ACCENT_THEMES.find((t) => t.id === accentTheme) ?? ACCENT_THEMES[0];
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setPalettePopoverOpen(false);
+      return;
+    }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        if (palettePopoverOpen) {
+          setPalettePopoverOpen(false);
+        } else {
+          onClose();
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open, onClose, palettePopoverOpen]);
+
+  useEffect(() => {
+    if (!palettePopoverOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (
+        palettePopoverRef.current &&
+        !palettePopoverRef.current.contains(e.target as Node)
+      ) {
+        setPalettePopoverOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [palettePopoverOpen]);
 
   const handleNav = (view: NavView) => {
     onNavigate(view);
@@ -160,100 +180,60 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
 
         {/* Scrollable Drawer Body */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-          {/* 1. Profile & Cloud Sync Pill */}
-          <section className="rounded-[20px] bg-white dark:bg-[#1C1714] border border-[#E8E0D5] dark:border-[#2E2520] p-3 shadow-warm space-y-2.5">
-            {user ? (
-              <div className="flex items-center justify-between gap-2.5">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  {user.photoURL ? (
-                    <img
-                      src={user.photoURL}
-                      alt={user.displayName}
-                      className="h-9 w-9 rounded-full object-cover border border-[#E8E0D5] dark:border-[#352A24]"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <span className="h-9 w-9 rounded-full bg-[#6E261A] text-white font-display text-xs font-bold flex items-center justify-center shrink-0">
-                      {user.displayName.slice(0, 1).toUpperCase()}
-                    </span>
-                  )}
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] truncate">
-                      {user.displayName}
-                    </p>
-                    <p className="text-[11px] text-[#2E5E3E] dark:text-[#63A87A] flex items-center gap-1 font-medium">
-                      <CheckCircle2 className="w-3 h-3 shrink-0" />
-                      {syncStatus === 'synced' ? 'Cloud Synced' : 'Connecting...'}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={onSignOut}
-                  className="px-2.5 py-1.5 rounded-full bg-[#F4EFE6] dark:bg-[#241D19] text-[11px] font-medium text-[#61554D] dark:text-[#A99B8E] hover:text-[#B83227] dark:hover:text-[#E87A70] flex items-center gap-1 press-tactile"
-                  title="Sign out"
+          {/* 1. Compact Profile + Streak Header Card (taps directly to Settings -> Profile Settings) */}
+          <button
+            type="button"
+            data-testid="drawer-profile-card"
+            onClick={() => {
+              onOpenProfileSettings();
+              onClose();
+            }}
+            className="w-full text-left rounded-[22px] squircle bg-white dark:bg-[#1C1714] border border-[#E8E0D5] dark:border-[#2E2520] hover:border-[#C89216] p-3 shadow-warm flex items-center justify-between gap-2.5 transition-colors press-tactile"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              {effectiveProfile.avatarUrl ? (
+                <img
+                  src={effectiveProfile.avatarUrl}
+                  alt={effectiveProfile.displayName}
+                  data-testid="drawer-profile-avatar-img"
+                  className="h-10 w-10 rounded-full object-cover border border-[#E8E0D5] dark:border-[#352A24] shrink-0"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <span
+                  data-testid="drawer-profile-avatar-initials"
+                  className="h-10 w-10 rounded-full bg-[#6E261A] dark:bg-[#9E3E2E] text-white font-display text-xs font-bold flex items-center justify-center shrink-0"
                 >
-                  <LogOut className="w-3 h-3" />
-                  Out
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="h-8 w-8 rounded-full bg-[#F4EFE6] dark:bg-[#241D19] text-[#61554D] dark:text-[#A99B8E] flex items-center justify-center shrink-0">
-                    <CloudOff className="w-4 h-4" />
+                  {effectiveProfile.initials}
+                </span>
+              )}
+
+              <div className="min-w-0">
+                <p
+                  data-testid="drawer-profile-name"
+                  className="text-sm font-bold text-[#1C1613] dark:text-[#F5F0E8] truncate leading-tight"
+                >
+                  {effectiveProfile.displayName}
+                </p>
+                {effectiveProfile.targetGoal && (
+                  <p className="text-[11px] text-[#61554D] dark:text-[#A99B8E] truncate mt-0.5">
+                    {effectiveProfile.targetGoal}
+                  </p>
+                )}
+                <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-[#FDF6E3] dark:bg-[#2C2215] border border-[#EED89A] dark:border-[#5C441B] px-2.5 py-0.5">
+                  <Flame className="w-3 h-3 text-[#C89216] dark:text-[#E0A92E] shrink-0" />
+                  <span
+                    data-testid="drawer-streak-pill"
+                    className="text-[11px] font-semibold tabular-nums text-[#7A5610] dark:text-[#E0A92E]"
+                  >
+                    70D Streak · {streakDays} {streakDays === 1 ? 'day' : 'days'}
                   </span>
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8]">
-                      Local Mode Active
-                    </p>
-                    <p className="text-[11px] text-[#61554D] dark:text-[#A99B8E] truncate">
-                      Sign in to sync across devices
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSignIn();
-                    onClose();
-                  }}
-                  className="px-3 py-1.5 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] text-white text-xs font-medium flex items-center gap-1.5 shrink-0 press-tactile"
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  Sign In
-                </button>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#EFE9DF] dark:border-[#2A221D]">
-              <div className="rounded-[14px] bg-[#FAF8F4] dark:bg-[#241D19] px-2.5 py-2 flex items-center gap-2">
-                <Database className="w-3.5 h-3.5 text-[#2E5E3E] dark:text-[#63A87A] shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-[10px] uppercase tracking-wider text-[#61554D] dark:text-[#A99B8E] font-medium">
-                    GateR Bank
-                  </p>
-                  <p className="text-xs font-bold tabular-nums text-[#1C1613] dark:text-[#F5F0E8] truncate">
-                    {gaterSyncStatus === 'syncing'
-                      ? 'Syncing...'
-                      : `${gaterCount.toLocaleString()} PYQs`}
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-[14px] bg-[#FDF6E3] dark:bg-[#2C2215] px-2.5 py-2 flex items-center gap-2">
-                <Flame className="w-3.5 h-3.5 text-[#C89216] dark:text-[#E0A92E] shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-[10px] uppercase tracking-wider text-[#7A5610] dark:text-[#D9B664] font-medium">
-                    70d Streak
-                  </p>
-                  <p className="text-xs font-bold tabular-nums text-[#1C1613] dark:text-[#F5F0E8]">
-                    {streakDays} {streakDays === 1 ? 'day' : 'days'}
-                  </p>
                 </div>
               </div>
             </div>
-          </section>
+
+            <ChevronRight className="w-4 h-4 text-[#8C7E75] dark:text-[#9A8B7E] shrink-0" />
+          </button>
 
           {/* 2. Primary Views + Simple Mode Pill */}
           <section className="space-y-1.5">
@@ -442,55 +422,6 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
                 <p className="text-[10px] text-[#61554D] dark:text-[#A99B8E]">Cmd / Ctrl + K</p>
               </button>
             </div>
-
-            {/* Install GATE '27 App PWA Pill Card */}
-            {pwaInstalled ? (
-              <div
-                data-testid="drawer-installed-badge"
-                className="rounded-[18px] bg-[#EBF5EE] dark:bg-[#152B1D] border border-[#B9D6C2] dark:border-[#254A33] px-3.5 py-2.5 flex items-center justify-between gap-2"
-              >
-                <span className="flex items-center gap-2 text-xs font-semibold text-[#2E5E3E] dark:text-[#7BB88F]">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  Installed as App
-                </span>
-                <span className="font-mono text-[10px] font-bold text-[#2E5E3E] dark:text-[#7BB88F]">
-                  PWA Ready
-                </span>
-              </div>
-            ) : (
-              <button
-                type="button"
-                data-testid="drawer-install-app-btn"
-                onClick={() => {
-                  onClose();
-                  onTriggerPwaInstall();
-                }}
-                className="w-full rounded-[18px] bg-[#FDF6E3] dark:bg-[#2C2215] border border-[#EED89A] dark:border-[#5C441B] hover:border-[#C89216] px-3.5 py-2.5 flex items-center justify-between gap-2.5 text-left press-tactile"
-              >
-                <span className="flex items-center gap-2.5 min-w-0">
-                  <span className="h-8 w-8 rounded-[11px] bg-[#6E261A] dark:bg-[#9E3E2E] text-[#FAF8F4] flex items-center justify-center shrink-0">
-                    {pwaCanPrompt ? (
-                      <Download className="w-4 h-4" />
-                    ) : (
-                      <Smartphone className="w-4 h-4" />
-                    )}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-xs font-bold text-[#6E261A] dark:text-[#E0A92E] truncate">
-                      Install GATE &apos;27 App
-                    </span>
-                    <span className="block text-[10px] text-[#7D570A] dark:text-[#D9B664] truncate">
-                      {pwaCanPrompt
-                        ? '1-tap install · Offline PYQs & Focus'
-                        : 'Android, iOS & Desktop Home Screen'}
-                    </span>
-                  </span>
-                </span>
-                <span className="px-2.5 py-1 rounded-full bg-[#6E261A] dark:bg-[#9E3E2E] text-white text-[10px] font-semibold shrink-0">
-                  Install
-                </span>
-              </button>
-            )}
           </section>
 
           {/* 4. GATE 2027 Milestones Mini-Card */}
@@ -515,16 +446,17 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
           </section>
         </div>
 
-        {/* 5. Settings, Light/Dark, 8-Color Theme Swatches & Credit Footer */}
-        <div className="px-4 py-3 border-t border-[#E8E0D5] dark:border-[#2E2520] bg-white/85 dark:bg-[#1C1714]/95 shrink-0 space-y-2.5">
-          <div className="flex items-center gap-2">
+        {/* 5. Compact Bottom Utility Bar + Floating Theme Popover + Full-Width Log Out / Sign In + Credit */}
+        <div className="relative px-4 py-3 border-t border-[#E8E0D5] dark:border-[#2E2520] bg-white/90 dark:bg-[#1C1714]/95 shrink-0 space-y-2.5">
+          {/* Sleek Single-Row Utility Bar: Light/Dark + Compact Palette Icon + Settings */}
+          <div className="flex items-center gap-1.5" ref={palettePopoverRef}>
             {/* Segmented Light/Dark Pill */}
             <div className="flex-1 flex items-center p-1 rounded-full bg-[#EFE9DF] dark:bg-[#261E1A] border border-[#E8E0D5] dark:border-[#352A24]">
               <button
                 type="button"
                 data-testid="drawer-theme-light"
                 onClick={() => onSetLightDark('light')}
-                className={`flex-1 py-1.5 rounded-full text-xs font-medium flex items-center justify-center gap-1.5 transition-all ${
+                className={`flex-1 py-1.5 rounded-full text-xs font-medium flex items-center justify-center gap-1 transition-all ${
                   theme === 'light'
                     ? 'bg-white text-[#1C1613] shadow-sm'
                     : 'text-[#61554D] dark:text-[#A99B8E]'
@@ -537,7 +469,7 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
                 type="button"
                 data-testid="drawer-theme-dark"
                 onClick={() => onSetLightDark('dark')}
-                className={`flex-1 py-1.5 rounded-full text-xs font-medium flex items-center justify-center gap-1.5 transition-all ${
+                className={`flex-1 py-1.5 rounded-full text-xs font-medium flex items-center justify-center gap-1 transition-all ${
                   theme === 'dark'
                     ? 'bg-[#1C1714] text-[#F5F0E8] shadow-sm border border-[#352A24]'
                     : 'text-[#61554D] dark:text-[#A99B8E]'
@@ -548,10 +480,100 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
               </button>
             </div>
 
+            {/* Single Compact Palette / Theme Icon Pill + Floating 8-Dot Popover */}
+            <div className="relative shrink-0">
+              {palettePopoverOpen && (
+                <div
+                  role="menu"
+                  aria-label="Choose color theme"
+                  data-testid="drawer-theme-popover"
+                  className="absolute bottom-full right-0 mb-2 z-20 w-[236px] rounded-[22px] squircle bg-[#FFFFFF] dark:bg-[#1C1714] border border-[#E8E0D5] dark:border-[#352A24] shadow-warm-lg p-3 space-y-2"
+                >
+                  <div className="flex items-center justify-between px-0.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[#61554D] dark:text-[#A99B8E]">
+                      Color Theme
+                    </span>
+                    <span className="text-[10px] font-bold text-[#6E261A] dark:text-[#E0A92E]">
+                      {activeAccentMeta.shortName}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {ACCENT_THEMES.map((t) => {
+                      const isSelected = accentTheme === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={isSelected}
+                          aria-label={`Switch color theme to ${t.name}`}
+                          title={t.name}
+                          data-testid={`drawer-accent-${t.id}`}
+                          onClick={() => {
+                            onSetAccentTheme(t.id);
+                            setPalettePopoverOpen(false);
+                            onThemeSelectedToast?.(t.name);
+                          }}
+                          className={`flex flex-col items-center gap-1 py-1.5 px-1 rounded-[14px] transition-all press-tactile ${
+                            isSelected
+                              ? 'bg-[#FAF8F4] dark:bg-[#261E1A] ring-1 ring-[#6E261A] dark:ring-[#E0A92E]'
+                              : 'hover:bg-[#FAF8F4] dark:hover:bg-[#241D19]'
+                          }`}
+                        >
+                          <span
+                            data-theme-swatch="true"
+                            style={{
+                              background: `linear-gradient(135deg, ${t.swatchPrimary} 50%, ${t.swatchSecondary} 50%)`,
+                            }}
+                            className={`w-6 h-6 rounded-full flex items-center justify-center shadow-xs ${
+                              isSelected
+                                ? 'ring-2 ring-offset-2 ring-[#C89216] dark:ring-offset-[#1C1714]'
+                                : 'border border-black/10 dark:border-white/15'
+                            }`}
+                          >
+                            {isSelected && (
+                              <Check className="w-3 h-3 text-white drop-shadow" strokeWidth={3} />
+                            )}
+                          </span>
+                          <span className="text-[9px] font-medium text-[#1C1613] dark:text-[#F5F0E8] leading-none truncate max-w-full">
+                            {t.shortName}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                data-testid="drawer-theme-palette-btn"
+                aria-label={`Color theme: ${activeAccentMeta.name}. Open theme picker`}
+                aria-expanded={palettePopoverOpen}
+                aria-haspopup="menu"
+                title={`Theme: ${activeAccentMeta.name}`}
+                onClick={() => setPalettePopoverOpen((prev) => !prev)}
+                className={`h-[34px] px-2.5 rounded-full border flex items-center gap-1.5 transition-colors press-tactile ${
+                  palettePopoverOpen
+                    ? 'bg-[#6E261A] dark:bg-[#9E3E2E] border-[#6E261A] dark:border-[#9E3E2E] text-white'
+                    : 'bg-[#F4EFE6] dark:bg-[#241D19] border-[#E8E0D5] dark:border-[#352A24] text-[#1C1613] dark:text-[#F5F0E8] hover:border-[#C89216]'
+                }`}
+              >
+                <Palette className="w-3.5 h-3.5 shrink-0" />
+                <span
+                  data-theme-swatch="true"
+                  style={{
+                    background: `linear-gradient(135deg, ${activeAccentMeta.swatchPrimary} 50%, ${activeAccentMeta.swatchSecondary} 50%)`,
+                  }}
+                  className="w-3.5 h-3.5 rounded-full border border-white/80 dark:border-black/30 shadow-xs shrink-0"
+                />
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={() => handleNav('settings')}
-              className={`px-3.5 py-2 rounded-full text-xs font-semibold flex items-center gap-1.5 press-tactile ${
+              className={`h-[34px] px-3 rounded-full text-xs font-semibold flex items-center gap-1.5 press-tactile shrink-0 ${
                 activeView === 'settings'
                   ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-white'
                   : 'bg-[#F4EFE6] dark:bg-[#241D19] text-[#1C1613] dark:text-[#F5F0E8] border border-[#E8E0D5] dark:border-[#352A24]'
@@ -562,59 +584,34 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
             </button>
           </div>
 
-          {/* Curated 8-Color Theme Switcher (4x2 Diagonally Split Dual-Tone Swatches) */}
-          <div
-            data-testid="drawer-color-theme-card"
-            className="rounded-[20px] bg-[#FAF8F4] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520] p-2.5 space-y-2"
-          >
-            <div className="flex items-center justify-between px-1">
-              <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-[#61554D] dark:text-[#A99B8E]">
-                <Palette className="w-3 h-3 text-[#6E261A] dark:text-[#E0A92E]" />
-                Color Theme
-              </span>
-              <span className="text-[10px] font-semibold text-[#6E261A] dark:text-[#E0A92E] truncate max-w-[160px]">
-                {ACCENT_THEMES.find((t) => t.id === accentTheme)?.shortName ?? 'Heritage'}
-              </span>
-            </div>
-            <div className="grid grid-cols-4 gap-1.5">
-              {ACCENT_THEMES.map((t) => {
-                const isSelected = accentTheme === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    title={t.name}
-                    aria-label={`Switch color theme to ${t.name}`}
-                    aria-pressed={isSelected}
-                    data-testid={`drawer-accent-${t.id}`}
-                    onClick={() => onSetAccentTheme(t.id)}
-                    className={`flex flex-col items-center gap-1 py-1.5 px-1 rounded-[14px] transition-all press-tactile ${
-                      isSelected
-                        ? 'bg-[#FFFFFF] dark:bg-[#1C1714] ring-1 ring-[#6E261A] dark:ring-[#E0A92E] shadow-xs'
-                        : 'hover:bg-[#FFFFFF]/70 dark:hover:bg-[#1C1714]/60'
-                    }`}
-                  >
-                    <span
-                      data-theme-swatch="true"
-                      style={{
-                        background: `linear-gradient(135deg, ${t.swatchPrimary} 50%, ${t.swatchSecondary} 50%)`,
-                      }}
-                      className={`w-6 h-6 rounded-full flex items-center justify-center shadow-xs transition-transform ${
-                        isSelected
-                          ? 'scale-105 ring-2 ring-offset-2 ring-[#C89216] dark:ring-offset-[#1C1714]'
-                          : 'border border-black/10 dark:border-white/15'
-                      }`}
-                    >
-                      {isSelected && <Check className="w-3 h-3 text-white drop-shadow" strokeWidth={3} />}
-                    </span>
-                    <span className="text-[10px] font-medium text-[#1C1613] dark:text-[#F5F0E8] leading-none truncate max-w-full">
-                      {t.shortName}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          {/* Full-Width Bordered Log Out / Sign In Pill at the Very Bottom */}
+          {user ? (
+            <button
+              type="button"
+              data-testid="drawer-auth-action-btn"
+              onClick={() => {
+                onSignOut();
+                onClose();
+              }}
+              className="w-full h-9 rounded-full border border-[#EBC7C3] dark:border-[#5E2823] bg-[#FAF8F4] dark:bg-[#241D19] hover:bg-[#FBEAE8] dark:hover:bg-[#3A1E1B] text-xs font-semibold text-[#B83227] dark:text-[#F08A80] flex items-center justify-center gap-1.5 transition-colors press-tactile"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Log Out
+            </button>
+          ) : (
+            <button
+              type="button"
+              data-testid="drawer-auth-action-btn"
+              onClick={() => {
+                onSignIn();
+                onClose();
+              }}
+              className="w-full h-9 rounded-full border border-[#6E261A]/35 dark:border-[#E0A92E]/40 bg-[#FAF8F4] dark:bg-[#241D19] hover:bg-[#6E261A] hover:text-white dark:hover:bg-[#9E3E2E] text-xs font-semibold text-[#6E261A] dark:text-[#E0A92E] flex items-center justify-center gap-1.5 transition-colors press-tactile"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              Sign In
+            </button>
+          )}
 
           <p className="text-center text-[11px] font-medium text-[#61554D] dark:text-[#A99B8E]">
             Built by <span className="text-[#6E261A] dark:text-[#E0A92E] font-semibold">Nihal Pawar</span> · GATE CSE 2027

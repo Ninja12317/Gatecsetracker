@@ -63,9 +63,21 @@ function detectInIframe(): boolean {
   }
 }
 
+const PWA_DISMISSED_STORAGE_KEY = 'gate27_pwa_install_dismissed_v1';
+
+function readPwaDismissed(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(PWA_DISMISSED_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export interface PwaInstallController {
   canPromptNatively: boolean;
   isInstalled: boolean;
+  isDismissed: boolean;
   isOnline: boolean;
   swActive: boolean;
   platformHint: PwaPlatformHint;
@@ -73,6 +85,7 @@ export interface PwaInstallController {
   guideOpen: boolean;
   openGuide: () => void;
   closeGuide: () => void;
+  dismissInstall: () => void;
   triggerInstall: () => Promise<'accepted' | 'dismissed' | 'fallback'>;
 }
 
@@ -81,6 +94,7 @@ export function usePwaInstall(): PwaInstallController {
     () => globalDeferredPrompt
   );
   const [isInstalled, setIsInstalled] = useState<boolean>(() => detectStandalone());
+  const [isDismissed, setIsDismissed] = useState<boolean>(() => readPwaDismissed());
   const [isOnline, setIsOnline] = useState<boolean>(() =>
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
@@ -164,10 +178,19 @@ export function usePwaInstall(): PwaInstallController {
 
   const openGuide = useCallback(() => setGuideOpen(true), []);
   const closeGuide = useCallback(() => setGuideOpen(false), []);
+  const dismissInstall = useCallback(() => {
+    setIsDismissed(true);
+    try {
+      window.localStorage.setItem(PWA_DISMISSED_STORAGE_KEY, '1');
+    } catch {
+      // ignore storage quota errors
+    }
+  }, []);
 
   return {
     canPromptNatively: Boolean(deferredPrompt),
     isInstalled,
+    isDismissed,
     isOnline,
     swActive,
     platformHint,
@@ -175,6 +198,7 @@ export function usePwaInstall(): PwaInstallController {
     guideOpen,
     openGuide,
     closeGuide,
+    dismissInstall,
     triggerInstall,
   };
 }

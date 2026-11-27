@@ -508,10 +508,19 @@ export interface AuthUserSummary {
   photoURL: string | null;
 }
 
+export interface UserProfile {
+  displayName: string;
+  targetGoal: string;
+  bio: string;
+  avatarDataUrl: string;
+  profileUpdatedAt?: number;
+}
+
 export interface WarRoomState {
   version: number;
   theme: 'light' | 'dark';
   settings: ExamSettings;
+  profile?: UserProfile;
   lastAutopilotIstDate: string;
   lastTrapsIstDate: string;
   progress: Record<string, SubtopicProgress>;

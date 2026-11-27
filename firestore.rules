@@ -505,6 +505,30 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll([
+          'ownerId', 'displayName', 'targetGoal', 'bio', 'avatarDataUrl', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'displayName', 'targetGoal', 'bio', 'avatarDataUrl',
+          'profileUpdatedAt', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && isValidId(data.ownerId)
+        && data.displayName is string && data.displayName.size() <= 80
+        && data.targetGoal is string && data.targetGoal.size() <= 120
+        && data.bio is string && data.bio.size() <= 300
+        && data.avatarDataUrl is string
+        && data.avatarDataUrl.size() <= 35000
+        && (
+          data.avatarDataUrl == '' ||
+          data.avatarDataUrl.matches('^data:image/(webp|jpeg|png);base64,[A-Za-z0-9+/=]+$')
+        )
+        && isOptionalBoundedNumber(data, 'profileUpdatedAt', 0, 9999999999999)
+        && data.updatedAt is timestamp;
+    }
+
     // ==================== COLLECTION MATCH RULES ====================
 
     match /users/{userId} {
@@ -939,6 +963,28 @@ service cloud.firestore {
             'wrongCount', 'unattemptedCount', 'penaltyMarks', 'accuracyPct', 'updatedAt'
           ]);
         allow delete: if isVerified() && isOwner(userId) && isValidId(testId);
+      }
+
+      match /profile/{profileId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(profileId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(profileId)
+          && isValidUserProfile(incoming(), userId)
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(profileId)
+          && isValidUserProfile(incoming(), userId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'displayName', 'targetGoal', 'bio', 'avatarDataUrl', 'profileUpdatedAt', 'updatedAt'
+          ]);
+        allow delete: if isVerified() && isOwner(userId) && isValidId(profileId);
       }
     }
   }
