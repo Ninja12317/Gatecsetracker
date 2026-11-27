@@ -1,6 +1,4 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import katex from 'katex';
-import DOMPurify from 'dompurify';
 import {
   Search,
   Bookmark,
@@ -45,6 +43,7 @@ import {
 } from '../utils/vaultImporter';
 import { downloadVaultCheatSheetPdf } from '../utils/pdfExporter';
 import { CodeBlock } from './CodeBlock';
+import { FormulaBlock, MathText } from './MathText';
 
 interface TipsVaultViewProps {
   allVaultCards: VaultCard[];
@@ -98,22 +97,6 @@ const SOURCE_BADGE_STYLE: Record<VaultCard['source'], string> = {
 
 const FormulaLatexBlock: React.FC<{ latex: string; compact?: boolean; darkSurface?: boolean }> = React.memo(
   ({ latex, compact = false, darkSurface = false }) => {
-    const renderedHtml = useMemo(() => {
-      try {
-        const html = katex.renderToString(latex, {
-          displayMode: !compact,
-          throwOnError: false,
-          strict: false,
-          trust: false,
-        });
-        return DOMPurify.sanitize(html, {
-          USE_PROFILES: { mathMl: true, html: true, svg: true },
-        });
-      } catch {
-        return '';
-      }
-    }, [latex, compact]);
-
     return (
       <div
         data-no-swipe="true"
@@ -124,20 +107,12 @@ const FormulaLatexBlock: React.FC<{ latex: string; compact?: boolean; darkSurfac
             : 'border-[#EED89A] dark:border-[#4F3B19] bg-[#FDF6E3]/85 dark:bg-[#241C11] text-[#1C1613] dark:text-[#F5F0E8]'
         } ${compact ? 'px-3.5 py-2.5 text-xs' : 'px-3.5 py-2.5 text-sm'}`}
       >
-        {renderedHtml ? (
-          <div
-            className="katex-vault-wrap [&_.katex-display]:my-0 [&_.katex]:text-[0.94em]"
-            dangerouslySetInnerHTML={{ __html: renderedHtml }}
-          />
-        ) : (
-          <code
-            className={`font-mono text-xs break-words ${
-              darkSurface ? 'text-[#E5B23A]' : 'text-[#6E261A] dark:text-[#E0A92E]'
-            }`}
-          >
-            {latex}
-          </code>
-        )}
+        <FormulaBlock
+          latex={latex}
+          compact={compact}
+          darkSurface={darkSurface}
+          className="[&_.katex]:text-[0.94em]"
+        />
       </div>
     );
   }
@@ -145,30 +120,9 @@ const FormulaLatexBlock: React.FC<{ latex: string; compact?: boolean; darkSurfac
 FormulaLatexBlock.displayName = 'FormulaLatexBlock';
 
 const InlineCodeText: React.FC<{ text: string; darkSurface?: boolean }> = React.memo(
-  ({ text, darkSurface = false }) => {
-    if (!text.includes('`')) return <>{text}</>;
-    const parts = text.split(/(`[^`]+`)/g);
-    return (
-      <>
-        {parts.map((part, idx) =>
-          part.startsWith('`') && part.endsWith('`') && part.length > 2 ? (
-            <code
-              key={idx}
-              className={`font-mono text-[0.88em] px-1.5 py-0.5 rounded-[7px] ${
-                darkSurface
-                  ? 'bg-[#32251E] text-[#E5B23A]'
-                  : 'bg-[#F4EFE6] dark:bg-[#2A221E] text-[#6E261A] dark:text-[#E5B23A]'
-              }`}
-            >
-              {part.slice(1, -1)}
-            </code>
-          ) : (
-            <React.Fragment key={idx}>{part}</React.Fragment>
-          )
-        )}
-      </>
-    );
-  }
+  ({ text, darkSurface = false }) => (
+    <MathText text={text} darkSurface={darkSurface} inline />
+  )
 );
 InlineCodeText.displayName = 'InlineCodeText';
 
@@ -1185,6 +1139,35 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
                         </span>
                       ))}
                     </div>
+
+                    {/* Rendered KaTeX Preview of First 2 Parsed Cards */}
+                    {bulkDryRun.cards.length > 0 && (
+                      <div
+                        data-testid="bulk-rendered-preview"
+                        className="pt-2 mt-2 border-t border-[#C5DEC9]/70 dark:border-[#2C4E38]/70 space-y-2"
+                      >
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-[#2E5E3E] dark:text-[#7BB88F]">
+                          Rendered Math Preview (showing {Math.min(2, bulkDryRun.cards.length)} of{' '}
+                          {bulkDryRun.cards.length})
+                        </p>
+                        {bulkDryRun.cards.slice(0, 2).map((previewCard, pIdx) => (
+                          <div
+                            key={`${previewCard.id}-${pIdx}`}
+                            className="rounded-[16px] border border-[#E8E0D5] dark:border-[#352B25] bg-[#FFFFFF] dark:bg-[#1C1714] p-3 space-y-1.5"
+                          >
+                            <div className="text-xs font-bold text-[#1C1613] dark:text-[#F5F0E8]">
+                              <MathText text={previewCard.title} inline />
+                            </div>
+                            {previewCard.formulaLatex && (
+                              <FormulaLatexBlock latex={previewCard.formulaLatex} compact />
+                            )}
+                            <p className="text-[11px] text-[#61554D] dark:text-[#C5B8AA] leading-relaxed">
+                              <MathText text={previewCard.gateTruth} inline />
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </>
                 ) : (
                   <p className="font-semibold text-[#B83227] dark:text-[#E87A70]">

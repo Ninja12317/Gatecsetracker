@@ -42,6 +42,7 @@ import type { AutopilotRunResult, UrlIngestResult } from '../hooks/useWarRoomSto
 import { DaysLeftPill, LiveCountdownTile } from './LiveCountdown';
 import { FocusQuickLaunchTile } from './FocusQuickLaunchTile';
 import { DailyGaLockInCard } from './DailyGaLockInCard';
+import { FormulaBlock, MathText } from './MathText';
 
 interface DashboardViewProps {
   state: WarRoomState;
@@ -719,19 +720,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
               <div className="space-y-3">
                 <h3 className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8]">
-                  {currentTip.title}
+                  <MathText text={currentTip.title} inline />
                 </h3>
                 <p className="text-sm text-[#61554D] dark:text-[#B8A99A] leading-relaxed">
-                  {currentTip.detail}
+                  <MathText text={currentTip.detail} />
                 </p>
                 {currentTip.formula && (
-                  <div className="rounded-[20px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#130F0D] px-4 py-3">
+                  <div
+                    data-testid="dashboard-trap-formula"
+                    className="rounded-[20px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#130F0D] px-4 py-3"
+                  >
                     <div className="text-[11px] font-medium text-[#8C7E75] dark:text-[#A99B8E] mb-1">
                       Key Invariant / Formula
                     </div>
-                    <code className="block font-mono text-xs text-[#6E261A] dark:text-[#E5B23A] leading-relaxed break-words">
-                      {currentTip.formula}
-                    </code>
+                    <FormulaBlock
+                      latex={currentTip.formula}
+                      compact
+                      className="text-[#6E261A] dark:text-[#E5B23A]"
+                    />
                   </div>
                 )}
               </div>

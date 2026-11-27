@@ -909,15 +909,13 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
                         </div>
                       </div>
 
-                      {question.bodyHtml ? (
-                        <div className="max-h-44 overflow-y-auto pr-1">
-                          <RichQuestionContent html={question.bodyHtml} />
-                        </div>
-                      ) : (
-                        <p className="text-sm text-[#1C1613] dark:text-[#F5F0E8] leading-relaxed">
-                          {question.prompt}
-                        </p>
-                      )}
+                      <div className="max-h-44 overflow-y-auto pr-1">
+                        <RichQuestionContent
+                          html={question.bodyHtml}
+                          plainText={question.prompt}
+                          className="text-sm"
+                        />
+                      </div>
 
                       <input
                         type="text"

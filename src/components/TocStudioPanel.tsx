@@ -20,6 +20,7 @@ import {
   CircleDot,
   Info,
 } from 'lucide-react';
+import { MathText } from './MathText';
 import {
   EPSILON,
   GATE_AUTOMATON_PRESETS,
@@ -1914,7 +1915,7 @@ export const TocStudioPanel: React.FC = () => {
               <div className="rounded-[22px] bg-[#FAF8F4] dark:bg-[#161210] border border-[#EED89A] dark:border-[#6B5016] p-4 space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-mono text-xs font-bold text-[#1C1613] dark:text-[#F5F0E8]">
-                    {aiClassifyResult.expression}
+                    <MathText text={aiClassifyResult.expression} inline />
                   </span>
                   <div className="flex items-center gap-1.5">
                     <span className={`px-3 py-0.5 rounded-full text-xs font-bold border ${getChomskyBadgeClass(aiClassifyResult.chomskyClass)}`}>
@@ -1928,19 +1929,27 @@ export const TocStudioPanel: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
                   <div className="rounded-[14px] bg-white dark:bg-[#1C1714] p-2.5 border border-[#E8E0D5] dark:border-[#2E2520]">
                     <div className="text-[10px] font-bold uppercase text-[#6E261A] dark:text-[#E0A92E]">Complement Class</div>
-                    <div className="text-[#1C1613] dark:text-[#F5F0E8] mt-0.5">{aiClassifyResult.complementClass}</div>
+                    <div className="text-[#1C1613] dark:text-[#F5F0E8] mt-0.5">
+                      <MathText text={aiClassifyResult.complementClass} inline />
+                    </div>
                   </div>
                   <div className="rounded-[14px] bg-white dark:bg-[#1C1714] p-2.5 border border-[#E8E0D5] dark:border-[#2E2520]">
                     <div className="text-[10px] font-bold uppercase text-[#6E261A] dark:text-[#E0A92E]">Myhill-Nerode / Automaton</div>
-                    <div className="text-[#1C1613] dark:text-[#F5F0E8] mt-0.5">{aiClassifyResult.myhillNerode}</div>
+                    <div className="text-[#1C1613] dark:text-[#F5F0E8] mt-0.5">
+                      <MathText text={aiClassifyResult.myhillNerode} inline />
+                    </div>
                   </div>
                   <div className="rounded-[14px] bg-white dark:bg-[#1C1714] p-2.5 border border-[#E8E0D5] dark:border-[#2E2520]">
                     <div className="text-[10px] font-bold uppercase text-[#6E261A] dark:text-[#E0A92E]">Pumping / Proof Sketch</div>
-                    <div className="text-[#1C1613] dark:text-[#F5F0E8] mt-0.5">{aiClassifyResult.pumpingSketch}</div>
+                    <div className="text-[#1C1613] dark:text-[#F5F0E8] mt-0.5">
+                      <MathText text={aiClassifyResult.pumpingSketch} inline />
+                    </div>
                   </div>
                   <div className="rounded-[14px] bg-[#FDF6E3] dark:bg-[#2C2215] p-2.5 border border-[#EED89A] dark:border-[#6B5016]">
                     <div className="text-[10px] font-bold uppercase text-[#8B6209] dark:text-[#E0A92E]">GATE Trap Note</div>
-                    <div className="text-[#1C1613] dark:text-[#F5F0E8] mt-0.5">{aiClassifyResult.gateTrap}</div>
+                    <div className="text-[#1C1613] dark:text-[#F5F0E8] mt-0.5">
+                      <MathText text={aiClassifyResult.gateTrap} inline />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2033,7 +2042,7 @@ export const TocStudioPanel: React.FC = () => {
                 </div>
                 <h3 className="text-lg font-bold tracking-tight text-[#FAF8F4]">{selectedLang.title}</h3>
                 <div className="font-mono text-xs text-[#E0A92E] bg-[#1A120E] rounded-[14px] px-3 py-2 border border-[#3A2D25]">
-                  {selectedLang.expression}
+                  <MathText text={selectedLang.expression} darkSurface inline />
                 </div>
               </div>
 
@@ -2042,28 +2051,36 @@ export const TocStudioPanel: React.FC = () => {
                   <div className="text-[10px] font-bold uppercase tracking-wider text-[#E0A92E] mb-1">
                     Complement (L̄) Classification
                   </div>
-                  <p className="text-[#F5F0E8] leading-relaxed">{selectedLang.complementClass}</p>
+                  <p className="text-[#F5F0E8] leading-relaxed">
+                    <MathText text={selectedLang.complementClass} darkSurface inline />
+                  </p>
                 </div>
 
                 <div className="rounded-[16px] bg-[#1A120E] border border-[#3A2D25] p-3">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-[#E0A92E] mb-1">
                     Myhill-Nerode Index & Intuition
                   </div>
-                  <p className="text-[#F5F0E8] leading-relaxed">{selectedLang.myhillNerode}</p>
+                  <p className="text-[#F5F0E8] leading-relaxed">
+                    <MathText text={selectedLang.myhillNerode} darkSurface inline />
+                  </p>
                 </div>
 
                 <div className="rounded-[16px] bg-[#1A120E] border border-[#3A2D25] p-3">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-[#E0A92E] mb-1">
                     Pumping Lemma / Proof Sketch
                   </div>
-                  <p className="text-[#F5F0E8] leading-relaxed">{selectedLang.pumpingSketch}</p>
+                  <p className="text-[#F5F0E8] leading-relaxed">
+                    <MathText text={selectedLang.pumpingSketch} darkSurface inline />
+                  </p>
                 </div>
 
                 <div className="rounded-[16px] bg-[#6E261A]/40 border border-[#C89216]/50 p-3">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-[#E0A92E] mb-1">
                     IIT Madras GATE Trap Watch
                   </div>
-                  <p className="text-[#FAF8F4] font-medium leading-relaxed">{selectedLang.gateTrap}</p>
+                  <p className="text-[#FAF8F4] font-medium leading-relaxed">
+                    <MathText text={selectedLang.gateTrap} darkSurface inline />
+                  </p>
                 </div>
               </div>
             </div>

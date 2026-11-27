@@ -990,3 +990,22 @@ html.dark[data-accent]:not([data-accent="brown"]) .dark\:ring-\[\#E0A92E\]:not([
     text-decoration: underline !important;
   }
 }
+
+/* Universal KaTeX FormulaBlock & Inline Math Layout Safety */
+.gate-formula-block .katex-display {
+  margin: 0.125rem 0;
+  text-align: left;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  padding-bottom: 0.125rem;
+}
+
+.gate-formula-block .katex {
+  font-size: 1em;
+}
+
+.gate-inline-math .katex {
+  font-size: 1em;
+}
+

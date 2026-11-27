@@ -18,6 +18,7 @@ import {
 } from './gateMath';
 import { formatPaceDuration, isSlowPaceQuestion } from './examPolish';
 import { computeMockDiagnostics, getNormalizedMockPct } from './mockResultParser';
+import { formatMathToPlainUnicode } from './mathFormat';
 
 export interface PdfExportJob {
   request: PdfExportRequest;
@@ -46,36 +47,6 @@ const CRIMSON: [number, number, number] = [184, 50, 39]; // #B83227
 const IVORY: [number, number, number] = [250, 248, 244]; // #FAF8F4
 const BORDER: [number, number, number] = [224, 214, 200]; // #E0D6C8
 
-const HTML_ENTITY_MAP: Record<string, string> = {
-  nbsp: ' ',
-  amp: '&',
-  lt: '<',
-  gt: '>',
-  quot: '"',
-  apos: "'",
-  '#39': "'",
-  '#x27': "'",
-  ndash: '-',
-  mdash: ' - ',
-  minus: '-',
-  times: ' x ',
-  divide: ' / ',
-  plusmn: '+/-',
-  le: '<=',
-  ge: '>=',
-  ne: '!=',
-  rarr: '->',
-  larr: '<-',
-  harr: '<->',
-  rArr: '=>',
-  infin: 'inf',
-  hellip: '...',
-  lsquo: "'",
-  rsquo: "'",
-  ldquo: '"',
-  rdquo: '"',
-};
-
 const UNICODE_ASCII_REPLACEMENTS: Array<[RegExp, string]> = [
   [/[\u2018\u2019]/g, "'"],
   [/[\u201C\u201D]/g, '"'],
@@ -84,27 +55,55 @@ const UNICODE_ASCII_REPLACEMENTS: Array<[RegExp, string]> = [
   [/\u00D7/g, ' x '],
   [/\u00F7/g, ' / '],
   [/\u00B1/g, '+/-'],
+  [/\u2213/g, '-/+'],
   [/\u2264/g, '<='],
   [/\u2265/g, '>='],
   [/\u2260/g, '!='],
   [/\u2248/g, '~='],
+  [/\u2261/g, '==='],
+  [/\u221D/g, ' prop '],
+  [/\u226A/g, '<<'],
+  [/\u226B/g, '>>'],
   [/\u2192/g, '->'],
   [/\u2190/g, '<-'],
+  [/\u2194/g, '<->'],
   [/\u21D2/g, '=>'],
+  [/\u21D0/g, '<='],
   [/\u21D4/g, '<=>'],
+  [/\u2295/g, ' XOR '],
+  [/\u2297/g, ' (x) '],
+  [/\u2218/g, ' o '],
+  [/\u230A/g, 'floor('],
+  [/\u230B/g, ')'],
+  [/\u2308/g, 'ceil('],
+  [/\u2309/g, ')'],
+  [/\u27E8/g, '<'],
+  [/\u27E9/g, '>'],
+  [/\u2224/g, ' !| '],
+  [/\u2225|\u2016/g, '||'],
+  [/\u0304/g, "'"],
   [/\u221E/g, 'inf'],
   [/\u2208/g, ' in '],
   [/\u2209/g, ' not in '],
   [/\u2286/g, ' subseteq '],
   [/\u2282/g, ' subset '],
+  [/\u2287/g, ' supseteq '],
+  [/\u2283/g, ' supset '],
   [/\u222A/g, ' U '],
   [/\u2229/g, ' cap '],
   [/\u2205/g, 'empty'],
   [/\u2200/g, 'forall '],
   [/\u2203/g, 'exists '],
+  [/\u2204/g, 'not exists '],
   [/\u2227/g, ' AND '],
   [/\u2228/g, ' OR '],
   [/\u00AC/g, 'NOT '],
+  [/\u22A2/g, ' |- '],
+  [/\u22A8/g, ' |= '],
+  [/\u2234/g, 'therefore '],
+  [/\u2235/g, 'because '],
+  [/\u22A4/g, 'TRUE'],
+  [/\u22A5/g, 'FALSE'],
   [/\u0398/g, 'Theta'],
   [/\u03B8/g, 'theta'],
   [/\u03A9/g, 'Omega'],
@@ -113,18 +112,29 @@ const UNICODE_ASCII_REPLACEMENTS: Array<[RegExp, string]> = [
   [/\u03C3/g, 'sigma'],
   [/\u03B1/g, 'alpha'],
   [/\u03B2/g, 'beta'],
+  [/\u0393/g, 'Gamma'],
   [/\u03B3/g, 'gamma'],
   [/\u03B4/g, 'delta'],
   [/\u0394/g, 'Delta'],
   [/\u03B5|\u03F5/g, 'epsilon'],
+  [/\u039B/g, 'Lambda'],
   [/\u03BB/g, 'lambda'],
   [/\u03BC/g, 'mu'],
+  [/\u03A0/g, 'Pi'],
   [/\u03C0/g, 'pi'],
   [/\u03C4/g, 'tau'],
+  [/\u03A6/g, 'Phi'],
   [/\u03C6|\u03D5/g, 'phi'],
+  [/\u03A8/g, 'Psi'],
+  [/\u03C8/g, 'psi'],
+  [/\u03C1/g, 'rho'],
+  [/\u03B7/g, 'eta'],
+  [/\u03B6/g, 'zeta'],
   [/\u221A/g, 'sqrt'],
   [/\u2211/g, 'sum'],
   [/\u220F/g, 'prod'],
+  [/\u222B/g, 'int '],
+  [/\u2202/g, 'd'],
   [/\u00B7|\u2022/g, ' · '],
   [/\u2713/g, '[OK]'],
   [/\u2717/g, '[X]'],
@@ -132,81 +142,16 @@ const UNICODE_ASCII_REPLACEMENTS: Array<[RegExp, string]> = [
 
 /**
  * Converts question HTML + KaTeX/LaTeX into crisp, ASCII-safe readable text for jsPDF Helvetica
- * so standard Type-1 PDF fonts never output garbled glyphs.
+ * so standard Type-1 PDF fonts never output garbled glyphs or raw LaTeX commands.
  */
 export function stripHtmlAndLatexForPdf(raw: string | undefined | null): string {
   if (!raw) return '';
-  let text = String(raw);
 
-  // Preserve block breaks before stripping tags
-  text = text
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|li|tr|h[1-6]|pre|blockquote)>/gi, '\n')
-    .replace(/<li[^>]*>/gi, '• ')
-    .replace(/<t[dh][^>]*>/gi, '  ')
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<img[^>]*alt=["']([^"']+)["'][^>]*>/gi, ' [Figure: $1] ')
-    .replace(/<img[^>]*>/gi, ' [Diagram] ')
-    .replace(/<[^>]+>/g, '');
+  // First run our canonical universal math & HTML entity normalizer (handles double-escaped LaTeX,
+  // nested \frac, \text{}, \;, \quad, \implies, \oplus, HTML tags/entities, etc.)
+  let text = formatMathToPlainUnicode(raw);
 
-  // Decode named & numeric HTML entities
-  text = text.replace(/&([a-zA-Z0-9#]+);/g, (full, entity: string) => {
-    const mapped = HTML_ENTITY_MAP[entity.toLowerCase()] ?? HTML_ENTITY_MAP[entity];
-    if (mapped !== undefined) return mapped;
-    if (entity.startsWith('#x') || entity.startsWith('#X')) {
-      const cp = parseInt(entity.slice(2), 16);
-      return Number.isFinite(cp) ? String.fromCodePoint(cp) : full;
-    }
-    if (entity.startsWith('#')) {
-      const cp = parseInt(entity.slice(1), 10);
-      return Number.isFinite(cp) ? String.fromCodePoint(cp) : full;
-    }
-    return full;
-  });
-
-  // Simplify common LaTeX constructs cleanly
-  text = text
-    .replace(/\$\$([\s\S]*?)\$\$/g, '$1')
-    .replace(/\$([^$]+)\$/g, '$1')
-    .replace(/\\\[([\s\S]*?)\\\]/g, '$1')
-    .replace(/\\\(([\s\S]*?)\\\)/g, '$1')
-    .replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)')
-    .replace(/\\sqrt\{([^{}]+)\}/g, 'sqrt($1)')
-    .replace(/\\text\{([^{}]+)\}/g, '$1')
-    .replace(/\\mathrm\{([^{}]+)\}/g, '$1')
-    .replace(/\\mathbf\{([^{}]+)\}/g, '$1')
-    .replace(/\\mathcal\{([^{}]+)\}/g, '$1')
-    .replace(/\\(leq|le)\b/g, '<=')
-    .replace(/\\(geq|ge)\b/g, '>=')
-    .replace(/\\(neq|ne)\b/g, '!=')
-    .replace(/\\times\b/g, ' x ')
-    .replace(/\\cdot\b/g, ' * ')
-    .replace(/\\pm\b/g, '+/-')
-    .replace(/\\(rightarrow|to)\b/g, '->')
-    .replace(/\\Rightarrow\b/g, '=>')
-    .replace(/\\leftarrow\b/g, '<-')
-    .replace(/\\infty\b/g, 'inf')
-    .replace(/\\in\b/g, ' in ')
-    .replace(/\\notin\b/g, ' not in ')
-    .replace(/\\subseteq\b/g, ' subseteq ')
-    .replace(/\\subset\b/g, ' subset ')
-    .replace(/\\cup\b/g, ' U ')
-    .replace(/\\cap\b/g, ' cap ')
-    .replace(/\\emptyset\b/g, 'empty')
-    .replace(/\\forall\b/g, 'forall ')
-    .replace(/\\exists\b/g, 'exists ')
-    .replace(/\\(land|wedge)\b/g, ' AND ')
-    .replace(/\\(lor|vee)\b/g, ' OR ')
-    .replace(/\\(lnot|neg)\b/g, 'NOT ')
-    .replace(/\\(Theta|theta|Omega|omega|Sigma|sigma|alpha|beta|gamma|delta|Delta|epsilon|lambda|mu|pi|tau|phi|log|ln|sin|cos|tan|mod|sum|prod)\b/g, '$1')
-    .replace(/\\(left|right|quad|qquad|,|;|!)\b/g, ' ')
-    .replace(/\\\{/g, '{')
-    .replace(/\\\}/g, '}')
-    .replace(/\^\{([^{}]+)\}/g, '^($1)')
-    .replace(/_\{([^{}]+)\}/g, '_($1)');
-
-  // Replace Unicode math/punctuation symbols with PDF-safe ASCII
+  // Replace Unicode math/punctuation symbols with PDF-safe ASCII for built-in Helvetica WinAnsi
   for (const [pattern, replacement] of UNICODE_ASCII_REPLACEMENTS) {
     text = text.replace(pattern, replacement);
   }

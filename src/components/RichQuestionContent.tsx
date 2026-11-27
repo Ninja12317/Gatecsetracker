@@ -1,8 +1,15 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import DOMPurify from 'dompurify';
-import katex from 'katex';
 import { X, ZoomIn } from 'lucide-react';
+import {
+  containsBareLatex,
+  decodeHtmlEntities,
+  formatMathToPlainUnicode,
+  renderKatexSafe,
+  tokenizeMathText,
+  unescapeDoubleLatex,
+} from '../utils/mathFormat';
 
 interface RichQuestionContentProps {
   html?: string;
@@ -27,65 +34,6 @@ const ALLOWED_ATTR = [
   'xmlns', 'viewBox', 'd', 'preserveAspectRatio', 'encoding', 'mathvariant',
 ];
 
-/**
- * Renders LaTeX math expressions ($$...$$, \[...\], $...$, \(...\)) into KaTeX HTML
- * while preserving <pre> and <code> blocks untouched.
- */
-function renderLatexInHtml(rawInput: string): string {
-  // 1. Protect <pre>...</pre> and <code>...</code> blocks from math replacement
-  const codePlaceholders: string[] = [];
-  let text = rawInput.replace(/<(pre|code)\b[^>]*>[\s\S]*?<\/\1>/gi, (match) => {
-    const idx = codePlaceholders.length;
-    codePlaceholders.push(match);
-    return `@@CODE_BLOCK_${idx}@@`;
-  });
-
-  // Decode common HTML entities inside math expressions (e.g. &lt; &gt; &amp;)
-  const decodeMathEntities = (expr: string) =>
-    expr
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&amp;/g, '&')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/<br\s*\/?>/gi, ' \\\\ ');
-
-  const safeKatex = (expr: string, displayMode: boolean): string => {
-    const cleaned = decodeMathEntities(expr).trim();
-    if (!cleaned) return '';
-    try {
-      return katex.renderToString(cleaned, {
-        displayMode,
-        throwOnError: false,
-        strict: false,
-        trust: false,
-      });
-    } catch {
-      return cleaned;
-    }
-  };
-
-  // 2. Display math: $$...$$ and \[...\]
-  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_m, expr: string) => safeKatex(expr, true));
-  text = text.replace(/\\\[([\s\S]+?)\\\]/g, (_m, expr: string) => safeKatex(expr, true));
-
-  // 3. Inline math: \(...\) and $...$ (avoid matching currency like "$5 and $10" across huge spans)
-  text = text.replace(/\\\(([\s\S]+?)\\\)/g, (_m, expr: string) => safeKatex(expr, false));
-  text = text.replace(/(?<!\\)\$(?!\s)([^$\n]{1,500}?)(?<!\s)\$/g, (_m, expr: string) => {
-    // Skip pure currency numbers like $50
-    if (/^\d+(?:,\d{3})*(?:\.\d+)?$/.test(expr.trim())) {
-      return `$${expr}$`;
-    }
-    return safeKatex(expr, false);
-  });
-
-  // 4. Restore <pre> / <code> blocks
-  text = text.replace(/@@CODE_BLOCK_(\d+)@@/g, (_m, idxStr: string) => {
-    return codePlaceholders[Number(idxStr)] ?? '';
-  });
-
-  return text;
-}
-
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -93,11 +41,101 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;');
 }
 
+/**
+ * Renders LaTeX math expressions ($$...$$, \[...\], $...$, \(...\), and bare un-delimited LaTeX)
+ * into KaTeX HTML while preserving <pre> and <code> blocks untouched and gracefully degrading
+ * malformed math to crisp plain Unicode (never raw `\text{` or `\;`).
+ */
+function renderLatexInHtml(rawInput: string): string {
+  // 1. Protect <pre>...</pre> and <code>...</code> blocks from math replacement
+  const placeholders: string[] = [];
+  const stash = (fragment: string): string => {
+    const idx = placeholders.length;
+    placeholders.push(fragment);
+    return `@@GATE_PROTECTED_${idx}@@`;
+  };
+
+  let text = rawInput.replace(/<(pre|code)\b[^>]*>[\s\S]*?<\/\1>/gi, (match) => stash(match));
+
+  // Normalize double-escaped delimiters outside code blocks
+  text = text
+    .replace(/\\\\\(/g, '\\(')
+    .replace(/\\\\\)/g, '\\)')
+    .replace(/\\\\\[/g, '\\[')
+    .replace(/\\\\\]/g, '\\]');
+
+  const safeKatex = (expr: string, displayMode: boolean): string => {
+    const prepped = unescapeDoubleLatex(
+      expr.replace(/<br\s*\/?>/gi, ' \\\\ ')
+    ).trim();
+    if (!prepped) return '';
+    const res = renderKatexSafe(prepped, displayMode);
+    if (!res.usedFallback && res.html) {
+      return stash(res.html);
+    }
+    return stash(
+      `<span class="font-mono text-[0.92em]">${escapeHtml(res.fallbackText)}</span>`
+    );
+  };
+
+  // 2. Display math: $$...$$ and \[...\]
+  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_m, expr: string) => safeKatex(expr, true));
+  text = text.replace(/\\\[([\s\S]+?)\\\]/g, (_m, expr: string) => safeKatex(expr, true));
+
+  // 3. Inline math: \(...\) and $...$ (avoid matching currency like "$5 and $10")
+  text = text.replace(/\\\(([\s\S]+?)\\\)/g, (_m, expr: string) => safeKatex(expr, false));
+  text = text.replace(/(?<!\\)\$(?!\s)([^$\n]{1,500}?)(?<!\s)\$/g, (full, expr: string) => {
+    const trimmed = expr.trim();
+    if (/^\d+(?:,\d{3})*(?:\.\d+)?(?:\s+[a-zA-Z]{2,})?$/.test(trimmed)) {
+      return full;
+    }
+    return safeKatex(expr, false);
+  });
+
+  // 4. Catch bare un-delimited LaTeX inside HTML text nodes (between tags, outside stashed KaTeX/code)
+  text = text.replace(/(^|>)([^<]+)(?=<|$)/g, (_m, prefix: string, chunk: string) => {
+    if (!chunk || !containsBareLatex(chunk)) return `${prefix}${chunk}`;
+    // Preserve any stashed placeholders inside the chunk
+    const parts = chunk.split(/(@@GATE_PROTECTED_\d+@@)/g);
+    const rendered = parts
+      .map((part) => {
+        if (!part || /^@@GATE_PROTECTED_\d+@@$/.test(part) || !containsBareLatex(part)) {
+          return part;
+        }
+        const tokens = tokenizeMathText(part);
+        return tokens
+          .map((tok) => {
+            if (tok.type === 'text') {
+              return escapeHtml(
+                containsBareLatex(tok.value) ? formatMathToPlainUnicode(tok.value) : tok.value
+              );
+            }
+            if (tok.type === 'code') {
+              return `<code>${escapeHtml(tok.value)}</code>`;
+            }
+            return safeKatex(tok.value, tok.type === 'display-math');
+          })
+          .join('');
+      })
+      .join('');
+    return `${prefix}${rendered}`;
+  });
+
+  // 5. Restore protected code & KaTeX blocks (2 passes in case of nested stashes)
+  for (let pass = 0; pass < 2; pass++) {
+    text = text.replace(/@@GATE_PROTECTED_(\d+)@@/g, (_m, idxStr: string) => {
+      return placeholders[Number(idxStr)] ?? '';
+    });
+  }
+
+  return text;
+}
+
 function sanitizeAndFormatHtml(rawHtml?: string, plainText?: string): string {
   const source = rawHtml && rawHtml.trim().length > 0
     ? rawHtml
     : plainText
-    ? `<p>${escapeHtml(plainText).replace(/\n/g, '<br/>')}</p>`
+    ? `<p>${escapeHtml(decodeHtmlEntities(plainText)).replace(/\n/g, '<br/>')}</p>`
     : '';
 
   if (!source) return '';

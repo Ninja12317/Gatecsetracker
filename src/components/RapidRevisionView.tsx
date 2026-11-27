@@ -20,6 +20,7 @@ import type {
 import { SUBJECT_MAP } from '../data/syllabus';
 import { RichQuestionContent } from './RichQuestionContent';
 import { CodeBlock } from './CodeBlock';
+import { FormulaBlock, MathText } from './MathText';
 import { toLocalIsoDate } from '../utils/gateMath';
 import { isSrsCardDueToday, makeSrsCardId } from '../utils/examPolish';
 
@@ -45,6 +46,7 @@ interface FlashCardItem {
   frontText: string;
   codeSnippet?: string;
   answerHeadline: string;
+  formula?: string;
   backDetail: string;
   extraNote?: string;
   sketchDataUrl?: string;
@@ -134,7 +136,8 @@ export const RapidRevisionView: React.FC<RapidRevisionViewProps> = ({
         badge: tip.category,
         title: tip.title,
         frontText: tip.summary || tip.title,
-        answerHeadline: tip.formula ? `Formula / Invariant: ${tip.formula}` : 'Exam Proof & Counter-Example',
+        answerHeadline: tip.formula ? 'Key Formula / Invariant' : 'Exam Proof & Counter-Example',
+        formula: tip.formula,
         backDetail: tip.detail,
         sourceUrl: tip.sourceUrl,
         dueToday: isSrsCardDueToday(srs, todayIso),
@@ -347,7 +350,7 @@ export const RapidRevisionView: React.FC<RapidRevisionViewProps> = ({
             <div className="p-6 sm:p-8 min-h-[260px] flex flex-col justify-between gap-5">
               <div className="pyq-reading-measure space-y-4">
                 <h2 className="font-display text-lg sm:text-xl font-bold text-[#1C1613] dark:text-[#F5F0E8]">
-                  {activeCard.title}
+                  <MathText text={activeCard.title} inline />
                 </h2>
 
                 {!flipped ? (
@@ -366,15 +369,25 @@ export const RapidRevisionView: React.FC<RapidRevisionViewProps> = ({
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="rounded-[20px] bg-[#ECF4EE] dark:bg-[#1C2A21] border border-[#C6DEC9] dark:border-[#2F4D39] px-4 py-3 text-sm font-semibold text-[#2E5E3E] dark:text-[#7AC493]">
-                      {activeCard.answerHeadline}
+                    <div className="rounded-[20px] bg-[#ECF4EE] dark:bg-[#1C2A21] border border-[#C6DEC9] dark:border-[#2F4D39] px-4 py-3 space-y-2">
+                      <div className="text-xs font-bold uppercase tracking-wider text-[#2E5E3E] dark:text-[#7AC493]">
+                        <MathText text={activeCard.answerHeadline} inline />
+                      </div>
+                      {activeCard.formula && (
+                        <FormulaBlock
+                          latex={activeCard.formula}
+                          compact
+                          className="text-[#1D422A] dark:text-[#B4E6C4]"
+                        />
+                      )}
                     </div>
                     <p className="text-sm leading-relaxed text-[#1C1613] dark:text-[#F5F0E8] whitespace-pre-wrap">
-                      {activeCard.backDetail}
+                      <MathText text={activeCard.backDetail} />
                     </p>
                     {activeCard.extraNote && (
                       <div className="rounded-[18px] bg-[#FDF6E3] dark:bg-[#2C2215] border border-[#EED89A] dark:border-[#5C441B] px-4 py-3 text-xs text-[#7A5610] dark:text-[#F0D594]">
-                        <strong>Your Mistake Note:</strong> {activeCard.extraNote}
+                        <strong>Your Mistake Note:</strong>{' '}
+                        <MathText text={activeCard.extraNote} inline />
                       </div>
                     )}
                     {activeCard.sketchDataUrl && (

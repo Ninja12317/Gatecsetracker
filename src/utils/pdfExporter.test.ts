@@ -135,6 +135,17 @@ describe('pdfExporter', () => {
     assert.ok(cleaned.includes('(a)/(b) <= inf'));
     assert.ok(cleaned.includes('-> Done.'));
     assert.ok(!cleaned.includes('<p>'));
+
+    // Double-escaped Huffman formula with \;, \quad, \text{}, \log
+    const huffman = stripHtmlAndLatexForPdf(
+      'T_{\\\\text{Huffman}} = O(n\\\\log n) \\\\;(\\\\text{or } O(n) \\\\text{ if frequencies pre-sorted using 2 queues}) \\\\quad \\\\implies V = C_{n-1} \\\\oplus C_n'
+    );
+    assert.ok(huffman.includes('T_Huffman = O(n log n)'));
+    assert.ok(huffman.includes('(or O(n) if frequencies pre-sorted using 2 queues)'));
+    assert.ok(huffman.includes('=> V = C_(n-1) XOR C_n'));
+    assert.ok(!huffman.includes('\\text'), `Raw \\text leaked: ${huffman}`);
+    assert.ok(!huffman.includes('\\;'), `Raw \\; leaked: ${huffman}`);
+    assert.ok(!huffman.includes('\\quad'), `Raw \\quad leaked: ${huffman}`);
   });
 
   it('sanitizes filenames cleanly with GATE27 prefix and ISO date', () => {

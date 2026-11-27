@@ -8,6 +8,7 @@ import type {
 } from '../types';
 import { GATE_2027_SYLLABUS, SUBJECT_MAP } from '../data/syllabus';
 import { RichQuestionContent } from './RichQuestionContent';
+import { MathText } from './MathText';
 import {
   computeCountdown,
   computeStudyStreak,
@@ -247,16 +248,20 @@ export const VectorPrintSheet: React.FC<VectorPrintSheetProps> = ({ job, state }
                 Verified Answer: {getOfficialAnswerText(q)}
               </div>
               {q.explanation && (
-                <div style={{ fontSize: '9.5pt', whiteSpace: 'pre-wrap' }}>{q.explanation}</div>
+                <div style={{ fontSize: '9.5pt', whiteSpace: 'pre-wrap' }}>
+                  <MathText text={q.explanation} />
+                </div>
               )}
               {q.wrongOptionAnalysis && (
                 <div style={{ fontSize: '9pt', color: '#61554D', marginTop: '4pt' }}>
-                  <strong>Trap / Distractor Note:</strong> {q.wrongOptionAnalysis}
+                  <strong>Trap / Distractor Note:</strong>{' '}
+                  <MathText text={q.wrongOptionAnalysis} inline />
                 </div>
               )}
               {request.mistakeNote && (
                 <div style={{ fontSize: '9pt', color: '#6E261A', marginTop: '4pt' }}>
-                  <strong>Personal Revision Note:</strong> {request.mistakeNote}
+                  <strong>Personal Revision Note:</strong>{' '}
+                  <MathText text={request.mistakeNote} inline />
                 </div>
               )}
             </div>
@@ -428,11 +433,13 @@ export const VectorPrintSheet: React.FC<VectorPrintSheetProps> = ({ job, state }
                     )}
                   </div>
                   {q.explanation && (
-                    <div style={{ whiteSpace: 'pre-wrap', color: '#1C1613' }}>{q.explanation}</div>
+                    <div style={{ whiteSpace: 'pre-wrap', color: '#1C1613' }}>
+                      <MathText text={q.explanation} />
+                    </div>
                   )}
                   {mistake?.userNote && (
                     <div style={{ marginTop: '4pt', color: '#6E261A' }}>
-                      <strong>Note:</strong> {mistake.userNote}
+                      <strong>Note:</strong> <MathText text={mistake.userNote} inline />
                     </div>
                   )}
                   {includeSketch && sketch && (
