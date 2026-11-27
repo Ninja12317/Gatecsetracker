@@ -78,7 +78,7 @@ service cloud.firestore {
           'lastAutopilotIstDate', 'bookmarkedQuestions', 'bookmarkedTips', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'ownerId', 'theme', 'themeMode', 'accentTheme', 'simpleMode',
+          'ownerId', 'theme', 'themeMode', 'accentTheme', 'accentUpdatedAt', 'simpleMode',
           'uiScale', 'contentWidth',
           'targetDateIso', 'shift', 'dailyGoalMinutes',
           'pomodoroWorkMinutes', 'pomodoroShortBreakMinutes', 'pomodoroLongBreakMinutes',
@@ -93,6 +93,7 @@ service cloud.firestore {
         && data.theme in ['light', 'dark']
         && (!('themeMode' in data) || data.themeMode in ['light', 'dark', 'system'])
         && (!('accentTheme' in data) || data.accentTheme in ['brown', 'green', 'red', 'blue', 'teal', 'graphite', 'navy', 'olive'])
+        && isOptionalBoundedNumber(data, 'accentUpdatedAt', 0, 9999999999999)
         && isOptionalBool(data, 'simpleMode')
         && (!('uiScale' in data) || data.uiScale in ['compact', 'default', 'comfortable'])
         && (!('contentWidth' in data) || data.contentWidth in ['focused', 'wide'])
@@ -502,7 +503,7 @@ service cloud.firestore {
           && incoming().updatedAt == request.time
           && parentUserExists(userId)
           && incoming().diff(existing()).affectedKeys().hasOnly([
-            'theme', 'themeMode', 'accentTheme', 'simpleMode',
+            'theme', 'themeMode', 'accentTheme', 'accentUpdatedAt', 'simpleMode',
             'uiScale', 'contentWidth',
             'targetDateIso', 'shift', 'dailyGoalMinutes',
             'pomodoroWorkMinutes', 'pomodoroShortBreakMinutes', 'pomodoroLongBreakMinutes',

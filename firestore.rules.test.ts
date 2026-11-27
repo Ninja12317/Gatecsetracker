@@ -36,9 +36,12 @@ test('Firestore rules cover every collection in firebase-blueprint.json', () => 
     'srs_cards/{cardId}',
     'ga_streak/{dateIso}',
     'trace_tables/{questionId}',
+    'vault_packs/{packId}',
+    'daily_progress/{docId}',
+    'rough_work/{docId}',
   ];
 
-  assert.equal(Object.keys(blueprint.firestore).length, 15);
+  assert.equal(Object.keys(blueprint.firestore).length, 18);
   for (const sub of subcollections) {
     assert.ok(rules.includes(`match /${sub}`), `Missing match block for /${sub}`);
   }
@@ -73,4 +76,12 @@ test('Dirty Dozen security assertions are enforced in rules', () => {
   // 7. Data URL format & size ceiling on saved sketches
   assert.ok(rules.includes('^data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$'));
   assert.ok(rules.includes('data.dataUrl.size() <= 450000'));
+
+  // 8. Theme persistence fields explicitly validated and allowlisted
+  assert.ok(
+    rules.includes(
+      "data.accentTheme in ['brown', 'green', 'red', 'blue', 'teal', 'graphite', 'navy', 'olive']"
+    )
+  );
+  assert.ok(rules.includes("isOptionalBoundedNumber(data, 'accentUpdatedAt', 0, 9999999999999)"));
 });

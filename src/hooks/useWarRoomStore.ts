@@ -91,6 +91,13 @@ import {
   normalizeAccentThemeId,
 } from '../utils/themeEngine';
 import {
+  applyAccentAttributeToDom,
+  parseAccentUpdatedAt,
+  readLocalAccentSelection,
+  resolveRemoteAccentSync,
+  writeLocalAccentSelection,
+} from '../utils/accentThemePersistence';
+import {
   createEmptyDailyProgress,
   recordDailyTestCompletion,
   selectOrGetDailyDpp,
@@ -155,12 +162,30 @@ function sanitizeDocId(raw: string): string {
 }
 
 function loadLocalState(): WarRoomState {
+  const localAccent = readLocalAccentSelection();
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createInitialWarRoomState();
+    if (!raw) {
+      const initial = createInitialWarRoomState();
+      return {
+        ...initial,
+        settings: {
+          ...initial.settings,
+          accentTheme: localAccent.accentTheme,
+          accentUpdatedAt: localAccent.accentUpdatedAt,
+        },
+      };
+    }
     const parsed = JSON.parse(raw) as Partial<WarRoomState>;
     const initial = createInitialWarRoomState();
     const resolvedTheme = parsed.theme === 'dark' ? 'dark' : 'light';
+    const resolvedAccent = localAccent.hasExplicitLocalSelection
+      ? localAccent.accentTheme
+      : normalizeAccentThemeId(parsed.settings?.accentTheme);
+    const resolvedAccentUpdatedAt = Math.max(
+      localAccent.accentUpdatedAt,
+      parseAccentUpdatedAt(parsed.settings?.accentUpdatedAt)
+    );
     return {
       ...initial,
       ...parsed,
@@ -169,7 +194,8 @@ function loadLocalState(): WarRoomState {
         ...initial.settings,
         ...(parsed.settings ?? {}),
         themeMode: parsed.settings?.themeMode ?? resolvedTheme,
-        accentTheme: normalizeAccentThemeId(parsed.settings?.accentTheme),
+        accentTheme: resolvedAccent,
+        accentUpdatedAt: resolvedAccentUpdatedAt,
         simpleMode: Boolean(parsed.settings?.simpleMode ?? false),
       },
       lastAutopilotIstDate: parsed.lastAutopilotIstDate ?? '',
@@ -204,7 +230,15 @@ function loadLocalState(): WarRoomState {
       studyLogs: parsed.studyLogs ?? [],
     };
   } catch {
-    return createInitialWarRoomState();
+    const initial = createInitialWarRoomState();
+    return {
+      ...initial,
+      settings: {
+        ...initial.settings,
+        accentTheme: localAccent.accentTheme,
+        accentUpdatedAt: localAccent.accentUpdatedAt,
+      },
+    };
   }
 }
 
@@ -273,6 +307,9 @@ export function useWarRoomStore() {
 
   const userRef = useRef<AuthUserSummary | null>(user);
   userRef.current = user;
+
+  const metaDocExistsRef = useRef<boolean>(false);
+  const pushedAccentSessionRef = useRef<string>('');
 
   // Sync dark/light/system theme mode AND 8-color accent theme on <html> + zero-flicker boot cache
   useEffect(() => {
@@ -494,11 +531,13 @@ export function useWarRoomStore() {
   // Build strict Firestore workspace meta payload
   const buildWorkspaceMetaPayload = useCallback((uid: string, s: WarRoomState) => {
     const mode = s.settings.themeMode ?? s.theme;
-    return {
+    const accent = normalizeAccentThemeId(s.settings.accentTheme);
+    const accentUpdatedAt = parseAccentUpdatedAt(s.settings.accentUpdatedAt);
+    const payload: Record<string, unknown> = {
       ownerId: uid,
       theme: s.theme === 'dark' ? 'dark' : 'light',
       themeMode: mode === 'dark' || mode === 'system' ? mode : 'light',
-      accentTheme: normalizeAccentThemeId(s.settings.accentTheme),
+      accentTheme: accent,
       simpleMode: Boolean(s.settings.simpleMode ?? false),
       uiScale:
         s.settings.uiScale === 'compact' || s.settings.uiScale === 'comfortable'
@@ -526,6 +565,10 @@ export function useWarRoomStore() {
       bookmarkedTips: s.bookmarkedTips.slice(0, 200),
       updatedAt: serverTimestamp(),
     };
+    if (accentUpdatedAt > 0) {
+      payload.accentUpdatedAt = accentUpdatedAt;
+    }
+    return payload;
   }, []);
 
   const persistWorkspaceMeta = useCallback(
@@ -534,7 +577,12 @@ export function useWarRoomStore() {
       if (!uid) return;
       const path = `users/${uid}/meta/workspace`;
       try {
-        await setDoc(doc(db, 'users', uid, 'meta', 'workspace'), buildWorkspaceMetaPayload(uid, nextState));
+        await setDoc(
+          doc(db, 'users', uid, 'meta', 'workspace'),
+          buildWorkspaceMetaPayload(uid, nextState),
+          { merge: true }
+        );
+        metaDocExistsRef.current = true;
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, path);
       }
@@ -759,6 +807,8 @@ export function useWarRoomStore() {
       setAuthReady(true);
 
       if (!fbUser) {
+        metaDocExistsRef.current = false;
+        pushedAccentSessionRef.current = '';
         setUser(null);
         setSyncStatus('signed_out');
         setState(loadLocalState());
@@ -774,8 +824,12 @@ export function useWarRoomStore() {
       setUser(summary);
       setSyncStatus('connecting');
       setAuthError('');
+      pushedAccentSessionRef.current = '';
 
       const uid = fbUser.uid;
+      const localAccentBeforeAuth = readLocalAccentSelection();
+      const preservedTheme = stateRef.current.theme;
+      const preservedThemeMode = stateRef.current.settings.themeMode ?? preservedTheme;
 
       try {
         // 1. Ensure Master Gate root doc /users/{uid} exists
@@ -790,24 +844,82 @@ export function useWarRoomStore() {
           });
         }
 
-        // 2. Ensure /users/{uid}/meta/workspace exists
+        // 2. Ensure /users/{uid}/meta/workspace exists (preserving current local accent theme)
         const metaRef = doc(db, 'users', uid, 'meta', 'workspace');
         const metaSnap = await getDoc(metaRef);
         if (!metaSnap.exists()) {
           const base = createInitialWarRoomState();
-          await setDoc(metaRef, buildWorkspaceMetaPayload(uid, base));
+          base.theme = preservedTheme;
+          base.settings.themeMode = preservedThemeMode;
+          base.settings.accentTheme = localAccentBeforeAuth.accentTheme;
+          if (localAccentBeforeAuth.accentUpdatedAt > 0) {
+            base.settings.accentUpdatedAt = localAccentBeforeAuth.accentUpdatedAt;
+          }
+          await setDoc(metaRef, buildWorkspaceMetaPayload(uid, base), { merge: true });
         }
+        metaDocExistsRef.current = true;
 
-        // Reset in-memory state cleanly to receive authoritative real-time Firestore docs
-        setState(createInitialWarRoomState());
+        // Reset in-memory state cleanly for Firestore docs while strictly preserving active local theme (zero snap-back to 'brown')
+        const latestLocalAccent = readLocalAccentSelection();
+        const freshForUser = createInitialWarRoomState();
+        freshForUser.theme = preservedTheme;
+        freshForUser.settings.themeMode = preservedThemeMode;
+        freshForUser.settings.accentTheme = latestLocalAccent.accentTheme;
+        freshForUser.settings.accentUpdatedAt = latestLocalAccent.accentUpdatedAt;
+        setState(freshForUser);
 
-        // 3. Attach real-time onSnapshot listeners across all 9 user subcollections
+        // 3. Attach real-time onSnapshot listeners across all user subcollections
         unsubscribes.push(
           onSnapshot(
             metaRef,
             (snap) => {
               if (!snap.exists()) return;
+              metaDocExistsRef.current = true;
               const d = snap.data();
+
+              // Race-safe accentTheme reconciliation: skip pending writes, never revert to 'brown' on missing field, enforce timestamp ordering
+              const currentLocal = readLocalAccentSelection();
+              const effectiveLocalTheme = currentLocal.hasExplicitLocalSelection
+                ? currentLocal.accentTheme
+                : normalizeAccentThemeId(stateRef.current.settings.accentTheme);
+              const effectiveLocalTs = Math.max(
+                currentLocal.accentUpdatedAt,
+                parseAccentUpdatedAt(stateRef.current.settings.accentUpdatedAt)
+              );
+
+              const accentDecision = resolveRemoteAccentSync({
+                localTheme: effectiveLocalTheme,
+                localUpdatedAt: effectiveLocalTs,
+                remoteTheme: d.accentTheme,
+                remoteUpdatedAt: d.accentUpdatedAt,
+                hasPendingWrites: snap.metadata.hasPendingWrites,
+              });
+
+              if (accentDecision.shouldApplyRemote) {
+                writeLocalAccentSelection(
+                  accentDecision.accentTheme,
+                  accentDecision.accentUpdatedAt
+                );
+                applyAccentAttributeToDom(accentDecision.accentTheme);
+              } else if (accentDecision.shouldPushLocalToRemote) {
+                const syncKey = `${uid}:${accentDecision.accentTheme}:${accentDecision.accentUpdatedAt}`;
+                if (pushedAccentSessionRef.current !== syncKey) {
+                  pushedAccentSessionRef.current = syncKey;
+                  const pushTs = accentDecision.accentUpdatedAt || Date.now();
+                  void setDoc(
+                    metaRef,
+                    {
+                      accentTheme: accentDecision.accentTheme,
+                      accentUpdatedAt: pushTs,
+                      updatedAt: serverTimestamp(),
+                    },
+                    { merge: true }
+                  ).catch((err) => {
+                    console.warn('Deferred accentTheme cloud sync failed; local theme preserved:', err);
+                  });
+                }
+              }
+
               setState((prev) => {
                 const themeVal = d.theme === 'dark' ? 'dark' : 'light';
                 const themeModeVal: ThemeMode =
@@ -832,7 +944,8 @@ export function useWarRoomStore() {
                         ? d.dailyGoalMinutes
                         : prev.settings.dailyGoalMinutes,
                     themeMode: themeModeVal,
-                    accentTheme: normalizeAccentThemeId(d.accentTheme),
+                    accentTheme: accentDecision.accentTheme,
+                    accentUpdatedAt: accentDecision.accentUpdatedAt,
                     simpleMode:
                       typeof d.simpleMode === 'boolean'
                         ? d.simpleMode
@@ -1565,17 +1678,51 @@ export function useWarRoomStore() {
   const setAccentTheme = useCallback(
     (accent: AccentThemeId) => {
       const safe = normalizeAccentThemeId(accent);
+      const prevTs = Math.max(
+        readLocalAccentSelection().accentUpdatedAt,
+        parseAccentUpdatedAt(stateRef.current.settings.accentUpdatedAt)
+      );
+      const nowMs = Math.max(Date.now(), prevTs + 1);
+
+      // 1. Immediately persist to localStorage & apply synchronously to <html data-accent="...">
+      writeLocalAccentSelection(safe, nowMs);
+      applyAccentAttributeToDom(safe);
+
+      // 2. Immediately update React state & ref
       const next: WarRoomState = {
         ...stateRef.current,
         settings: {
           ...stateRef.current.settings,
           accentTheme: safe,
+          accentUpdatedAt: nowMs,
         },
       };
+      stateRef.current = next;
       setState(next);
-      void persistWorkspaceMeta(next);
+
+      // 3. Immediately write to Firestore via merge (zero debounce; never reverts local state on offline/error)
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      const metaRef = doc(db, 'users', uid, 'meta', 'workspace');
+      const writePromise = metaDocExistsRef.current
+        ? setDoc(
+            metaRef,
+            {
+              accentTheme: safe,
+              accentUpdatedAt: nowMs,
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          )
+        : setDoc(metaRef, buildWorkspaceMetaPayload(uid, next), { merge: true }).then(() => {
+            metaDocExistsRef.current = true;
+          });
+
+      void writePromise.catch((err) => {
+        console.warn('Firestore accentTheme write failed; preserving localStorage theme:', err);
+      });
     },
-    [persistWorkspaceMeta]
+    [buildWorkspaceMetaPayload]
   );
 
   const setSimpleMode = useCallback(
@@ -3124,6 +3271,9 @@ export function useWarRoomStore() {
 
   const resetAllData = useCallback(async () => {
     const fresh = createInitialWarRoomState();
+    const nowMs = Math.max(Date.now(), readLocalAccentSelection().accentUpdatedAt + 1);
+    fresh.settings.accentUpdatedAt = nowMs;
+    writeLocalAccentSelection(fresh.settings.accentTheme, nowMs);
     setState(fresh);
 
     const uid = userRef.current?.uid;

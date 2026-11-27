@@ -66,6 +66,10 @@
           "type": "string",
           "enum": ["brown", "green", "red", "blue", "teal", "graphite", "navy", "olive"]
         },
+        "accentUpdatedAt": {
+          "type": "number",
+          "description": "Epoch millisecond timestamp of the last explicit accentTheme selection for race-safe sync."
+        },
         "simpleMode": { "type": "boolean" },
         "uiScale": {
           "type": "string",

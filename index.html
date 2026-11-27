@@ -45,7 +45,11 @@
             olive: 1,
           };
           var mode = 'light';
-          var accent = 'brown';
+          var accent = '';
+          var directAccent = localStorage.getItem('gate27_accent_theme');
+          if (directAccent && VALID[directAccent]) {
+            accent = directAccent;
+          }
           var bootRaw = localStorage.getItem('gate27_theme_boot_v1');
           if (bootRaw) {
             var boot = JSON.parse(bootRaw);
@@ -53,29 +57,34 @@
               if (boot.mode === 'dark' || boot.mode === 'light' || boot.mode === 'system') {
                 mode = boot.mode;
               }
-              if (boot.accent && VALID[boot.accent]) {
+              if (!accent && boot.accent && VALID[boot.accent]) {
                 accent = boot.accent;
               }
             }
-          } else {
+          }
+          if (!accent || !bootRaw) {
             var stateRaw = localStorage.getItem('gate27_war_room_state_v2');
             if (stateRaw) {
               var st = JSON.parse(stateRaw);
               if (st && st.settings) {
                 if (
-                  st.settings.themeMode === 'dark' ||
-                  st.settings.themeMode === 'light' ||
-                  st.settings.themeMode === 'system'
+                  !bootRaw &&
+                  (st.settings.themeMode === 'dark' ||
+                    st.settings.themeMode === 'light' ||
+                    st.settings.themeMode === 'system')
                 ) {
                   mode = st.settings.themeMode;
                 }
-                if (st.settings.accentTheme && VALID[st.settings.accentTheme]) {
+                if (!accent && st.settings.accentTheme && VALID[st.settings.accentTheme]) {
                   accent = st.settings.accentTheme;
                 }
-              } else if (st && st.theme === 'dark') {
+              } else if (!bootRaw && st && st.theme === 'dark') {
                 mode = 'dark';
               }
             }
+          }
+          if (!accent) {
+            accent = 'brown';
           }
           var isDark =
             mode === 'dark' ||

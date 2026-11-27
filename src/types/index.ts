@@ -314,6 +314,7 @@ export interface ExamSettings {
   dailyGoalMinutes: number;
   themeMode: ThemeMode;
   accentTheme: AccentThemeId;
+  accentUpdatedAt?: number;
   simpleMode: boolean;
   uiScale: UiScaleMode;
   contentWidth: ContentWidthMode;
