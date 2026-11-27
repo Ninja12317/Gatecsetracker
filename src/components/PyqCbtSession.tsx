@@ -46,6 +46,10 @@ import {
   isSlowPaceQuestion,
 } from '../utils/examPolish';
 import { computePyqBottomFooterState } from '../utils/mobileNav';
+import {
+  formatQuestionKeySeed,
+  parseManualAnswerInput,
+} from '../utils/communityKeys';
 import { SketchpadStudioPanel } from './SketchpadStudioPanel';
 import { CodeBlock } from './CodeBlock';
 import { RichQuestionContent } from './RichQuestionContent';
@@ -199,6 +203,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
   const [verifyingIds, setVerifyingIds] = useState<Record<string, boolean>>({});
   const [verifyFeedback, setVerifyFeedback] = useState<Record<string, { ok: boolean; msg: string }>>({});
   const [manualKeyDrafts, setManualKeyDrafts] = useState<Record<string, string>>({});
+  const [manualNoteDrafts, setManualNoteDrafts] = useState<Record<string, string>>({});
   const [manualKeySaved, setManualKeySaved] = useState<Record<string, boolean>>({});
   const [editingKeyIds, setEditingKeyIds] = useState<Record<string, boolean>>({});
   const [mobilePaletteOpen, setMobilePaletteOpen] = useState(false);
@@ -462,50 +467,25 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
       const raw = (manualKeyDrafts[q.id] ?? '').trim();
       if (!raw) return;
 
-      let record: Omit<VerifiedAnswerRecord, 'updatedAt'> | null = null;
-      if (q.format === 'MCQ') {
-        const clean = raw.toUpperCase().replace(/[^A-E]/g, '').slice(0, 1);
-        if (!clean) return;
-        record = {
-          questionId: q.id,
-          format: 'MCQ',
-          correctOption: clean,
-          explanation: q.explanation || 'Official answer key saved by user.',
-          wrongOptionAnalysis: q.wrongOptionAnalysis || '',
-          source: 'manual',
-        };
-      } else if (q.format === 'MSQ') {
-        const cleanList = Array.from(
-          new Set(
-            raw
-              .toUpperCase()
-              .split(/[\s,;]+/)
-              .map((x) => x.replace(/[^A-E]/g, '').slice(0, 1))
-              .filter((x) => /^[A-E]$/.test(x))
-          )
-        ).sort();
-        if (cleanList.length === 0) return;
-        record = {
-          questionId: q.id,
-          format: 'MSQ',
-          correctOptions: cleanList,
-          explanation: q.explanation || 'Official MSQ answer key saved by user.',
-          wrongOptionAnalysis: q.wrongOptionAnalysis || '',
-          source: 'manual',
-        };
-      } else {
-        const num = Number(raw);
-        if (!Number.isFinite(num)) return;
-        record = {
-          questionId: q.id,
-          format: 'NAT',
-          natAnswer: num,
-          natTolerance: 0.01,
-          explanation: q.explanation || 'Official NAT answer key saved by user.',
-          wrongOptionAnalysis: q.wrongOptionAnalysis || '',
-          source: 'manual',
-        };
-      }
+      const parsed = parseManualAnswerInput(q.format, raw);
+      if (!parsed) return;
+
+      const draftNote = (manualNoteDrafts[q.id] ?? '').trim();
+      const explanation = draftNote || q.explanation || '';
+
+      const record: Omit<VerifiedAnswerRecord, 'updatedAt'> = {
+        questionId: q.id,
+        format: parsed.format,
+        correctOption: parsed.correctOption,
+        correctOptions: parsed.correctOptions,
+        natAnswer: parsed.natAnswer,
+        natRangeMin: parsed.natRangeMin,
+        natRangeMax: parsed.natRangeMax,
+        natTolerance: parsed.natTolerance,
+        explanation,
+        wrongOptionAnalysis: q.wrongOptionAnalysis || '',
+        source: 'manual',
+      };
 
       const saved = await onSaveVerifiedAnswer(record);
       setManualKeySaved((prev) => ({ ...prev, [q.id]: true }));
@@ -533,7 +513,14 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
           : prev
       );
     },
-    [manualKeyDrafts, onSaveVerifiedAnswer, session.responses, onRecordAttempt, setSession]
+    [
+      manualKeyDrafts,
+      manualNoteDrafts,
+      onSaveVerifiedAnswer,
+      session.responses,
+      onRecordAttempt,
+      setSession,
+    ]
   );
 
   const handleAiVerifyQuestion = useCallback(
@@ -743,14 +730,9 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
         ? `${q.natRangeMin} to ${q.natRangeMax}${q.natUnit ? ` ${q.natUnit}` : ''}`
         : `${q.natAnswer ?? ''}${q.natUnit ? ` ${q.natUnit}` : ''}`;
 
-    const editableKeySeed =
-      q.format === 'MCQ'
-        ? q.correctOption ?? ''
-        : q.format === 'MSQ'
-        ? q.correctOptions?.join(', ') ?? ''
-        : q.natAnswer !== undefined
-        ? String(q.natAnswer)
-        : '';
+    const editableKeySeed = formatQuestionKeySeed(q);
+    const updatedByName =
+      q.verifiedByName || state.verifiedAnswers[q.id]?.updatedByName || '';
 
     return (
       <div
@@ -807,9 +789,12 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {hasKey && (
+            {hasKey ? (
               <>
-                <span className="font-mono text-xs font-bold px-3 py-1 rounded-full bg-[#FFFFFF] dark:bg-[#1C1714] border border-[#E8E0D5] dark:border-[#352A24] text-[#1C1613] dark:text-[#F5F0E8]">
+                <span
+                  data-testid={`official-key-badge-${q.id}`}
+                  className="font-mono text-xs font-bold px-3 py-1 rounded-full bg-[#FFFFFF] dark:bg-[#1C1714] border border-[#E8E0D5] dark:border-[#352A24] text-[#1C1613] dark:text-[#F5F0E8]"
+                >
                   Official Key: {officialKeyLabel}
                 </span>
                 <button
@@ -820,6 +805,10 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
                       ...prev,
                       [q.id]: prev[q.id] ?? editableKeySeed,
                     }));
+                    setManualNoteDrafts((prev) => ({
+                      ...prev,
+                      [q.id]: prev[q.id] ?? (q.explanation || ''),
+                    }));
                   }}
                   data-testid={`edit-key-btn-${q.id}`}
                   className="inline-flex items-center gap-1 h-8 px-3 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FFFFFF] dark:bg-[#1C1714] text-[11px] font-semibold text-[#61554D] dark:text-[#D8CBB8] hover:border-[#C89216] press-tactile"
@@ -828,6 +817,22 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
                   {isEditingKey ? 'Cancel' : 'Edit Key'}
                 </button>
               </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingKeyIds((prev) => ({ ...prev, [q.id]: true }));
+                  window.setTimeout(() => {
+                    const el = document.getElementById(`save-key-${q.id}`);
+                    el?.focus();
+                  }, 20);
+                }}
+                data-testid={`add-key-btn-${q.id}`}
+                className="inline-flex items-center gap-1 h-8 px-3 rounded-full border border-[#C89216] bg-[#FDF6E3] dark:bg-[#2C2215] text-[11px] font-semibold text-[#8B6209] dark:text-[#E0A92E] hover:bg-[#F9ECCB] press-tactile"
+              >
+                <KeyRound className="h-3 w-3" />
+                Add Official Key
+              </button>
             )}
 
             {showGateOverflow ? (
@@ -855,7 +860,17 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
           </div>
         </div>
 
-        {/* Unverified OR Inline Edit Official Key Controls */}
+        {/* Subtle community attribution caption when Official Key was contributed/updated */}
+        {hasKey && updatedByName && (
+          <p
+            data-testid={`official-key-attribution-${q.id}`}
+            className="text-[11px] text-[#8C7E75] dark:text-[#A99B8E] -mt-2"
+          >
+            Official Key · Updated by {updatedByName}
+          </p>
+        )}
+
+        {/* Unverified OR Inline Edit Official Key Controls (Open to all users) */}
         {(!hasKey || isEditingKey) && (
           <div className="rounded-[18px] border border-[#EED89A] dark:border-[#5C441B] bg-[#FFFFFF] dark:bg-[#1C1714] p-3.5 space-y-3">
             {!hasKey && (
@@ -901,7 +916,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
               </div>
             )}
 
-            {/* Permanent Official Answer Key Input (recalculates score & history immediately) */}
+            {/* Shared Community Official Answer Key Editor (recalculates score & history immediately for all users) */}
             <div
               className={`flex flex-wrap items-center gap-2 ${
                 !hasKey ? 'pt-2.5 border-t border-[#EFE9DF] dark:border-[#2E2520]' : ''
@@ -911,7 +926,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
                 htmlFor={`save-key-${q.id}`}
                 className="text-[11px] font-medium text-[#61554D] dark:text-[#A99B8E]"
               >
-                {hasKey ? 'Update Official Answer Key:' : 'Official Answer Key:'}
+                {hasKey ? 'Update Official Key:' : 'Add Official Key:'}
               </label>
               <input
                 id={`save-key-${q.id}`}
@@ -926,9 +941,20 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
                     ? 'e.g. B'
                     : q.format === 'MSQ'
                     ? 'e.g. A, C'
-                    : 'e.g. 42.5'
+                    : 'e.g. 42.5 or 42 to 43'
                 }
-                className="h-8 w-32 px-3 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FAF8F4] dark:bg-[#130F0D] font-mono text-xs text-[#1C1613] dark:text-[#F5F0E8]"
+                className="h-8 w-40 px-3 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FAF8F4] dark:bg-[#130F0D] font-mono text-xs text-[#1C1613] dark:text-[#F5F0E8]"
+              />
+              <input
+                id={`save-note-${q.id}`}
+                data-testid={`manual-note-input-${q.id}`}
+                type="text"
+                value={manualNoteDrafts[q.id] ?? ''}
+                onChange={(e) =>
+                  setManualNoteDrafts((prev) => ({ ...prev, [q.id]: e.target.value }))
+                }
+                placeholder="Optional short official note or explanation..."
+                className="h-8 flex-1 min-w-[200px] px-3 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FAF8F4] dark:bg-[#130F0D] text-xs text-[#1C1613] dark:text-[#F5F0E8]"
               />
               <button
                 type="button"
@@ -936,7 +962,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
                 onClick={() => void handleSaveManualKey(q)}
                 className="h-8 px-3.5 rounded-full border border-[#C89216] bg-[#FDF6E3] dark:bg-[#2C2215] text-xs font-semibold text-[#8B6209] dark:text-[#E0A92E] hover:bg-[#F9ECCB] press-tactile"
               >
-                Save Key
+                Save Official Key
               </button>
               {manualKeySaved[q.id] && (
                 <span className="text-[11px] font-semibold text-[#2E5E3E] dark:text-[#7BB88F]">
@@ -1996,11 +2022,17 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
             </div>
           </div>
 
-          {/* Smooth Accordion Review Panel (Practice Sprint mode) */}
+          {/* Smooth Accordion Review Panel (Practice Sprint mode — auto-recalculates when community key arrives) */}
           {!isTimedMock && (
             <div className="accordion-grid" data-open={currentEval ? 'true' : 'false'}>
               <div className="accordion-inner">
-                {currentEval && renderReviewPanel(currentQ, currentEval)}
+                {currentEval &&
+                  renderReviewPanel(
+                    currentQ,
+                    hasVerifiedKey
+                      ? evaluateQuestionResponse(currentQ, currentResp)
+                      : currentEval
+                  )}
               </div>
             </div>
           )}

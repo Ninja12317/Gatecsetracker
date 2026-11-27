@@ -43,10 +43,11 @@ test('Firestore rules cover every collection in firebase-blueprint.json', () => 
     'profile/{profileId}',
   ];
 
-  assert.equal(Object.keys(blueprint.firestore).length, 20);
+  assert.equal(Object.keys(blueprint.firestore).length, 21);
   for (const sub of subcollections) {
     assert.ok(rules.includes(`match /${sub}`), `Missing match block for /${sub}`);
   }
+  assert.ok(rules.includes('match /verified_keys/{questionId}'), 'Missing top-level match /verified_keys/{questionId}');
 });
 
 test('Dirty Dozen security assertions are enforced in rules', () => {
@@ -97,4 +98,10 @@ test('Dirty Dozen security assertions are enforced in rules', () => {
   assert.ok(rules.includes('function isValidUserProfile('));
   assert.ok(rules.includes('data.avatarDataUrl.size() <= 35000'));
   assert.ok(rules.includes('^data:image/(webp|jpeg|png);base64,[A-Za-z0-9+/=]+$'));
+
+  // 11. Open community-shared verified_keys collection (zero admin gate, bounded list, schema validated)
+  assert.ok(rules.includes('function isValidCommunityVerifiedKey('));
+  assert.ok(rules.includes('match /verified_keys/{questionId}'));
+  assert.ok(rules.includes('request.query.limit != null && request.query.limit <= 5000'));
+  assert.ok(!/isAdmin\s*\(/.test(rules), 'verified_keys must stay 100% open community without admin gate');
 });

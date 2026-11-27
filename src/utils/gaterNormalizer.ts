@@ -872,10 +872,16 @@ export function applyVerifiedAnswer(
 ): Question {
   if (!verified) return question;
   const format = verified.format || question.format;
+  const hasNatRange =
+    typeof verified.natRangeMin === 'number' &&
+    typeof verified.natRangeMax === 'number' &&
+    Number.isFinite(verified.natRangeMin) &&
+    Number.isFinite(verified.natRangeMax);
   const hasKey =
     (format === 'MCQ' && Boolean(verified.correctOption)) ||
     (format === 'MSQ' && Boolean(verified.correctOptions && verified.correctOptions.length > 0)) ||
-    (format === 'NAT' && typeof verified.natAnswer === 'number' && Number.isFinite(verified.natAnswer));
+    (format === 'NAT' &&
+      (hasNatRange || (typeof verified.natAnswer === 'number' && Number.isFinite(verified.natAnswer))));
 
   return {
     ...question,
@@ -884,9 +890,13 @@ export function applyVerifiedAnswer(
     correctOption: format === 'MCQ' ? verified.correctOption : question.correctOption,
     correctOptions: format === 'MSQ' ? verified.correctOptions : question.correctOptions,
     natAnswer: format === 'NAT' ? verified.natAnswer : question.natAnswer,
+    natRangeMin: format === 'NAT' ? (hasNatRange ? verified.natRangeMin : undefined) : question.natRangeMin,
+    natRangeMax: format === 'NAT' ? (hasNatRange ? verified.natRangeMax : undefined) : question.natRangeMax,
     natTolerance: format === 'NAT' ? (verified.natTolerance ?? 0.01) : question.natTolerance,
     explanation: verified.explanation || question.explanation,
     wrongOptionAnalysis: verified.wrongOptionAnalysis || question.wrongOptionAnalysis,
+    verifiedByName: verified.updatedByName || question.verifiedByName,
+    verifiedAtMs: verified.updatedAtMs ?? question.verifiedAtMs,
   };
 }
 

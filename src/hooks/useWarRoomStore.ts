@@ -5,6 +5,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  limit,
   onSnapshot,
   query,
   serverTimestamp,
@@ -75,7 +76,12 @@ import {
   type ArshanPyqKeyRecord,
 } from '../utils/arshanNormalizer';
 import { deduplicateQuestionPool } from '../utils/testBuilder';
-import { readGateRCache, writeGateRCache } from '../utils/pyqIndexedDb';
+import {
+  readCommunityKeysCache,
+  readGateRCache,
+  writeCommunityKeysCache,
+  writeGateRCache,
+} from '../utils/pyqIndexedDb';
 import {
   buildLocalTagTrapsFallback,
   computeNextSrsSchedule,
@@ -126,6 +132,13 @@ import {
   sanitizeUserProfile,
   shouldApplyRemoteProfile,
 } from '../utils/profileHelpers';
+import {
+  communityKeyDocToVerifiedRecord,
+  mergeCommunityAndLocalVerifiedKeys,
+  resolveContributorDisplayName,
+  verifiedRecordToCommunityKeyDoc,
+  type CommunityVerifiedKeyDoc,
+} from '../utils/communityKeys';
 
 const STORAGE_KEY = 'gate27_war_room_state_v2';
 const STANDALONE_ROUGH_WORK_KEY = 'standalone_rough_work';
@@ -358,6 +371,9 @@ export function useWarRoomStore() {
 
   const stateRef = useRef<WarRoomState>(state);
   stateRef.current = state;
+  const communityDocsRef = useRef<Record<string, CommunityVerifiedKeyDoc>>({});
+  const communityKeysRef = useRef<Record<string, VerifiedAnswerRecord>>({});
+  const allQuestionsRef = useRef<Question[]>([]);
 
   const userRef = useRef<AuthUserSummary | null>(user);
   userRef.current = user;
@@ -1357,7 +1373,13 @@ export function useWarRoomStore() {
                   updatedAt: new Date().toISOString(),
                 };
               });
-              setState((prev) => ({ ...prev, verifiedAnswers }));
+              setState((prev) => ({
+                ...prev,
+                verifiedAnswers: mergeCommunityAndLocalVerifiedKeys(
+                  communityKeysRef.current,
+                  verifiedAnswers
+                ),
+              }));
             },
             (err) => handleFirestoreError(err, OperationType.LIST, `users/${uid}/verified_answers`)
           )
@@ -1699,10 +1721,216 @@ export function useWarRoomStore() {
     return deduplicateQuestionPool(combined);
   }, [gaterQuestions, state.customQuestions, state.verifiedAnswers]);
 
+  allQuestionsRef.current = allQuestions;
+
   const verifiedBankCount = useMemo(
     () => allQuestions.filter((q) => questionHasAnswerKey(q)).length,
     [allQuestions]
   );
+
+  // Merge incoming community verified_keys docs into state & recalculate any affected testHistory/dailyProgress live
+  const applyCommunityDocsToStore = useCallback(
+    (docsMap: Record<string, CommunityVerifiedKeyDoc>) => {
+      const mergedDocs: Record<string, CommunityVerifiedKeyDoc> = {
+        ...communityDocsRef.current,
+      };
+      for (const [keyId, docData] of Object.entries(docsMap)) {
+        const prevDoc = mergedDocs[keyId];
+        if (!prevDoc || (docData.updatedAt ?? 0) >= (prevDoc.updatedAt ?? 0)) {
+          mergedDocs[keyId] = docData;
+        }
+      }
+      communityDocsRef.current = mergedDocs;
+
+      const formatByQid = new Map<string, Question['format']>();
+      const baseQMap = new Map<string, Question>();
+      for (const q of allQuestionsRef.current) {
+        formatByQid.set(q.id, q.format);
+        baseQMap.set(q.id, q);
+      }
+
+      const converted: Record<string, VerifiedAnswerRecord> = {};
+      for (const [docKey, docData] of Object.entries(mergedDocs)) {
+        const qId = docData.questionId || docKey;
+        const rec = communityKeyDocToVerifiedRecord(docData, formatByQid.get(qId));
+        if (rec) {
+          converted[rec.questionId] = rec;
+        }
+      }
+      communityKeysRef.current = converted;
+
+      const changedHistoryEntries: TestHistoryEntry[] = [];
+
+      setState((prev) => {
+        const nextVerified = mergeCommunityAndLocalVerifiedKeys(converted, prev.verifiedAnswers);
+
+        // Build live question map with latest merged keys
+        const liveMap = new Map<string, Question>();
+        for (const [id, q] of baseQMap.entries()) {
+          const v = nextVerified[id];
+          liveMap.set(id, v ? applyVerifiedAnswer(q, v) : q);
+        }
+
+        let historyChanged = false;
+        const nextTestHistory = prev.testHistory.map((entry) => {
+          const touchesConverted = entry.questionIds.some((id) => Boolean(converted[id]));
+          if (!touchesConverted) return entry;
+          const recalc = recalculateTestHistoryEntry(entry, liveMap);
+          const didChange =
+            recalc.gradedMarks !== entry.gradedMarks ||
+            recalc.gradedMaxMarks !== entry.gradedMaxMarks ||
+            recalc.pendingKeyCount !== entry.pendingKeyCount ||
+            recalc.correctCount !== entry.correctCount ||
+            recalc.wrongCount !== entry.wrongCount ||
+            recalc.accuracyPct !== entry.accuracyPct;
+          if (didChange) {
+            historyChanged = true;
+            changedHistoryEntries.push(recalc);
+            return recalc;
+          }
+          return entry;
+        });
+
+        let dailyChanged = false;
+        const recalcDailyMap = (map: Record<string, DailyTestRecord>) => {
+          const nextMap: Record<string, DailyTestRecord> = { ...map };
+          for (const [dateKey, rec] of Object.entries(map)) {
+            if (!rec.completedAt || !rec.responses) continue;
+            if (!rec.questionIds.some((id) => Boolean(converted[id]))) continue;
+            const qs = rec.questionIds
+              .map((id) => liveMap.get(id))
+              .filter((q): q is Question => Boolean(q));
+            if (qs.length === 0) continue;
+            const parsedResponses: Record<string, ReturnType<typeof parseSerializedResponse>> = {};
+            for (const q of qs) {
+              parsedResponses[q.id] = parseSerializedResponse(q.format, rec.responses[q.id]);
+            }
+            const summary = gradeTestSessionStrict(qs, parsedResponses);
+            if (
+              summary.gradedMarks !== rec.score ||
+              summary.pendingKeyCount !== (rec.pendingKeyCount ?? 0) ||
+              summary.accuracyPct !== rec.accuracy
+            ) {
+              nextMap[dateKey] = {
+                ...rec,
+                score: summary.gradedMarks,
+                maxMarks: summary.totalMaxMarks,
+                gradedMaxMarks: summary.gradedMaxMarks,
+                pendingKeyCount: summary.pendingKeyCount,
+                accuracy: summary.accuracyPct,
+                attemptedCount: summary.gradedAttemptedCount + summary.pendingAttemptedCount,
+                correctCount: summary.correctCount,
+              };
+              dailyChanged = true;
+            }
+          }
+          return nextMap;
+        };
+
+        const nextDailyProgress: DailyProgressState = {
+          ...prev.dailyProgress,
+          dailyDppByDate: recalcDailyMap(prev.dailyProgress.dailyDppByDate),
+          dailyGaByDate: recalcDailyMap(prev.dailyProgress.dailyGaByDate),
+        };
+
+        return {
+          ...prev,
+          verifiedAnswers: nextVerified,
+          testHistory: historyChanged ? nextTestHistory : prev.testHistory,
+          dailyProgress: dailyChanged ? nextDailyProgress : prev.dailyProgress,
+        };
+      });
+
+      // Persist recalculated test_history rows to Firestore when signed in
+      const uid = userRef.current?.uid;
+      if (uid && changedHistoryEntries.length > 0) {
+        for (const updatedEntry of changedHistoryEntries) {
+          const histDocId = sanitizeDocId(updatedEntry.id);
+          const histPath = `users/${uid}/test_history/${histDocId}`;
+          updateDoc(doc(db, 'users', uid, 'test_history', histDocId), {
+            responses: updatedEntry.responses,
+            gradedMarks: updatedEntry.gradedMarks,
+            gradedMaxMarks: updatedEntry.gradedMaxMarks,
+            totalMaxMarks: updatedEntry.totalMaxMarks,
+            gradedCount: updatedEntry.gradedCount,
+            gradedAttemptedCount: updatedEntry.gradedAttemptedCount,
+            pendingKeyCount: updatedEntry.pendingKeyCount,
+            correctCount: updatedEntry.correctCount,
+            wrongCount: updatedEntry.wrongCount,
+            unattemptedCount: updatedEntry.unattemptedCount,
+            penaltyMarks: updatedEntry.penaltyMarks,
+            accuracyPct: updatedEntry.accuracyPct,
+            updatedAt: serverTimestamp(),
+          }).catch((err) => handleFirestoreError(err, OperationType.UPDATE, histPath));
+        }
+      }
+    },
+    []
+  );
+
+  // Global Open Community Official Answer Keys: Instant IndexedDB hydration + live Firestore onSnapshot for ALL users
+  useEffect(() => {
+    let active = true;
+
+    void readCommunityKeysCache().then((cachedDocs) => {
+      if (!active) return;
+      if (Object.keys(cachedDocs).length > 0) {
+        applyCommunityDocsToStore(cachedDocs);
+      }
+    });
+
+    const unsub = onSnapshot(
+      query(collection(db, 'verified_keys'), limit(5000)),
+      (snap) => {
+        if (!active) return;
+        const docsMap: Record<string, CommunityVerifiedKeyDoc> = {};
+        snap.forEach((docSnap) => {
+          const d = docSnap.data();
+          const qId = typeof d.questionId === 'string' && d.questionId ? d.questionId : docSnap.id;
+          const correctAnswer = d.correctAnswer;
+          const validAnswer =
+            (typeof correctAnswer === 'string' && correctAnswer.trim().length > 0) ||
+            (Array.isArray(correctAnswer) && correctAnswer.length > 0);
+          if (!validAnswer) return;
+          docsMap[qId] = {
+            questionId: qId,
+            correctAnswer: Array.isArray(correctAnswer)
+              ? correctAnswer.map(String)
+              : String(correctAnswer),
+            ...(typeof d.explanation === 'string' && d.explanation.trim()
+              ? { explanation: d.explanation.trim() }
+              : {}),
+            ...(typeof d.updatedByName === 'string' && d.updatedByName.trim()
+              ? { updatedByName: d.updatedByName.trim() }
+              : {}),
+            updatedAt:
+              typeof d.updatedAt === 'number' && Number.isFinite(d.updatedAt)
+                ? d.updatedAt
+                : Date.now(),
+          };
+        });
+        void writeCommunityKeysCache({ ...communityDocsRef.current, ...docsMap });
+        if (Object.keys(docsMap).length > 0) {
+          applyCommunityDocsToStore(docsMap);
+        }
+      },
+      (err) => {
+        console.warn('Community verified_keys listener notice:', err);
+      }
+    );
+
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, [applyCommunityDocsToStore]);
+
+  // Re-apply cached community keys once GateR PYQ bank finishes hydrating so all formats & testHistory recalc cleanly
+  useEffect(() => {
+    if (gaterQuestions.length > 0 && Object.keys(communityDocsRef.current).length > 0) {
+      applyCommunityDocsToStore(communityDocsRef.current);
+    }
+  }, [gaterQuestions.length, applyCommunityDocsToStore]);
 
   // Unified Vault Cards: Imported/GitHub Packs + Mined Mistakes (₹0) + Legacy Custom/Traps + 132-Card Master Bundle
   const allVaultCards = useMemo<VaultCard[]>(() => {
@@ -2333,13 +2561,35 @@ export function useWarRoomStore() {
 
   const saveVerifiedAnswer = useCallback(
     async (record: Omit<VerifiedAnswerRecord, 'updatedAt'>): Promise<VerifiedAnswerRecord> => {
-      const nowIso = new Date().toISOString();
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
       const docId = sanitizeDocId(record.questionId);
+      const prevState = stateRef.current;
+      const contributorName =
+        (typeof record.updatedByName === 'string' && record.updatedByName.trim()) ||
+        resolveContributorDisplayName(prevState.profile, userRef.current);
+
       const saved: VerifiedAnswerRecord = {
         ...record,
         questionId: record.questionId,
+        updatedByName: contributorName,
+        updatedAtMs: nowMs,
         updatedAt: nowIso,
       };
+
+      // Update local IndexedDB community keys cache immediately (works offline & instantaneously)
+      const communityDoc = verifiedRecordToCommunityKeyDoc(saved, contributorName);
+      if (communityDoc) {
+        communityDocsRef.current = {
+          ...communityDocsRef.current,
+          [communityDoc.questionId]: communityDoc,
+        };
+        communityKeysRef.current = {
+          ...communityKeysRef.current,
+          [record.questionId]: saved,
+        };
+        void writeCommunityKeysCache(communityDocsRef.current);
+      }
 
       // Build updated question map so testHistory, attempts, mistakes, and daily tests recalculate immediately
       const liveQuestionMap = new Map<string, Question>();
@@ -2347,7 +2597,6 @@ export function useWarRoomStore() {
         liveQuestionMap.set(q.id, q.id === record.questionId ? applyVerifiedAnswer(q, saved) : q);
       }
 
-      const prevState = stateRef.current;
       const updatedQuestion = liveQuestionMap.get(record.questionId);
 
       // Recalculate any test history entries containing this question
@@ -2433,6 +2682,19 @@ export function useWarRoomStore() {
 
       const uid = userRef.current?.uid;
       if (uid) {
+        // 1. Write directly to top-level shared community bank `verified_keys/{questionId}` (open to all users)
+        if (communityDoc) {
+          const sharedPath = `verified_keys/${communityDoc.questionId}`;
+          try {
+            await setDoc(doc(db, 'verified_keys', communityDoc.questionId), communityDoc, {
+              merge: true,
+            });
+          } catch (err) {
+            handleFirestoreError(err, OperationType.WRITE, sharedPath);
+          }
+        }
+
+        // 2. Also keep personal copy in users/{uid}/verified_answers for AI wrongOptionAnalysis backup
         const path = `users/${uid}/verified_answers/${docId}`;
         try {
           await setDoc(doc(db, 'users', uid, 'verified_answers', docId), {

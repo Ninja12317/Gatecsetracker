@@ -59,6 +59,10 @@ service cloud.firestore {
       return !(field in data) || data[field] is bool;
     }
 
+    function isOptionalBoundedString(data, field, maxLen) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLen);
+    }
+
     // ==================== ENTITY VALIDATION BLUEPRINTS ====================
 
     function isValidUserRoot(data, userId) {
@@ -529,6 +533,27 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidCommunityVerifiedKey(data, questionId) {
+      return data.keys().hasAll(['questionId', 'correctAnswer', 'updatedAt'])
+        && data.keys().hasOnly(['questionId', 'correctAnswer', 'explanation', 'updatedByName', 'updatedAt'])
+        && data.questionId == questionId
+        && isValidId(data.questionId)
+        && (
+          (data.correctAnswer is string && data.correctAnswer.size() >= 1 && data.correctAnswer.size() <= 80) ||
+          (
+            data.correctAnswer is list
+            && data.correctAnswer.size() >= 1
+            && data.correctAnswer.size() <= 6
+            && data.correctAnswer[0] is string
+            && data.correctAnswer[0].size() >= 1
+            && data.correctAnswer[0].size() <= 16
+          )
+        )
+        && isOptionalBoundedString(data, 'explanation', 5000)
+        && isOptionalBoundedString(data, 'updatedByName', 80)
+        && data.updatedAt is number && data.updatedAt >= 0 && data.updatedAt <= 9999999999999;
+    }
+
     // ==================== COLLECTION MATCH RULES ====================
 
     match /users/{userId} {
@@ -986,6 +1011,23 @@ service cloud.firestore {
           ]);
         allow delete: if isVerified() && isOwner(userId) && isValidId(profileId);
       }
+    }
+
+    // Open community-shared official answer keys (zero PII; readable by all, writable by any verified user with zero admin gate)
+    match /verified_keys/{questionId} {
+      allow get: if isValidId(questionId);
+      allow list: if request.query.limit != null && request.query.limit <= 5000;
+      allow create: if isVerified()
+        && isValidId(questionId)
+        && isValidCommunityVerifiedKey(incoming(), questionId);
+      allow update: if isVerified()
+        && isValidId(questionId)
+        && isValidCommunityVerifiedKey(incoming(), questionId)
+        && incoming().questionId == existing().questionId
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'correctAnswer', 'explanation', 'updatedByName', 'updatedAt'
+        ]);
+      allow delete: if false;
     }
   }
 }

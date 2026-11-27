@@ -1014,6 +1014,33 @@
         }
       },
       "required": ["ownerId", "displayName", "targetGoal", "bio", "avatarDataUrl", "updatedAt"]
+    },
+    "CommunityVerifiedKey": {
+      "title": "CommunityVerifiedKey",
+      "description": "Open community-shared official GATE CSE answer key (zero PII; any verified signed-in user can add or update).",
+      "type": "object",
+      "properties": {
+        "questionId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "correctAnswer": {
+          "description": "MCQ option ('A'-'E'), MSQ option array (['A', 'C']), or NAT scalar/range string ('42.5' or '42 to 43')."
+        },
+        "explanation": {
+          "type": "string",
+          "maxLength": 5000
+        },
+        "updatedByName": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "required": ["questionId", "correctAnswer", "updatedAt"]
     }
   },
   "firestore": {
@@ -1096,6 +1123,10 @@
     "/users/{userId}/profile/{profileId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
       "description": "User profile details (display name, target goal, bio, and compressed <25KB avatar data URL)."
+    },
+    "/verified_keys/{questionId}": {
+      "schema": { "$ref": "#/entities/CommunityVerifiedKey" },
+      "description": "Open community-shared official answer keys readable by all users and writable by any verified signed-in user (no admin gate)."
     }
   }
 }

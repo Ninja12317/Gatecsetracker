@@ -127,6 +127,8 @@ export interface Question {
   natUnit?: string;
   explanation: string;
   wrongOptionAnalysis: string;
+  verifiedByName?: string;
+  verifiedAtMs?: number;
   fingerprint?: string;
   isCustom?: boolean;
 }
@@ -137,10 +139,14 @@ export interface VerifiedAnswerRecord {
   correctOption?: string;
   correctOptions?: string[];
   natAnswer?: number;
+  natRangeMin?: number;
+  natRangeMax?: number;
   natTolerance?: number;
   explanation: string;
   wrongOptionAnalysis: string;
   source: 'manual' | 'ai';
+  updatedByName?: string;
+  updatedAtMs?: number;
   updatedAt: string;
 }
 

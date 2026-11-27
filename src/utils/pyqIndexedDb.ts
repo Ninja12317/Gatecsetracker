@@ -113,3 +113,65 @@ export async function getGateRCacheSizeBytes(): Promise<{ bytes: number; count: 
     return { bytes: 0, count: cached.questions.length, syncedAt: cached.syncedAt ?? null };
   }
 }
+
+const COMMUNITY_KEYS_CACHE_KEY = 'community_verified_keys_v1';
+
+export interface CachedCommunityKeysRecord {
+  key: string;
+  syncedAt: number;
+  docs: Record<string, {
+    questionId: string;
+    correctAnswer: string | string[];
+    explanation?: string;
+    updatedByName?: string;
+    updatedAt: number;
+  }>;
+}
+
+export async function readCommunityKeysCache(): Promise<CachedCommunityKeysRecord['docs']> {
+  try {
+    const db = await openCacheDb();
+    return await new Promise<CachedCommunityKeysRecord['docs']>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const getReq = store.get(COMMUNITY_KEYS_CACHE_KEY);
+      getReq.onsuccess = () => {
+        const res = getReq.result as CachedCommunityKeysRecord | undefined;
+        resolve(res && res.docs && typeof res.docs === 'object' ? res.docs : {});
+      };
+      getReq.onerror = () => reject(getReq.error);
+      tx.oncomplete = () => db.close();
+    });
+  } catch {
+    return {};
+  }
+}
+
+export async function writeCommunityKeysCache(
+  docs: CachedCommunityKeysRecord['docs']
+): Promise<void> {
+  try {
+    const db = await openCacheDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const record: CachedCommunityKeysRecord = {
+        key: COMMUNITY_KEYS_CACHE_KEY,
+        syncedAt: Date.now(),
+        docs,
+      };
+      store.put(record);
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        reject(tx.error);
+      };
+    });
+  } catch {
+    // Gracefully ignore IndexedDB quota/privacy mode failures
+  }
+}
+

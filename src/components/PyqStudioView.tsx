@@ -20,6 +20,7 @@ import {
   Trash2,
   Play,
   Target,
+  Pencil,
 } from 'lucide-react';
 import type {
   DailyTestRecord,
@@ -49,6 +50,10 @@ import {
   hasVerifiedAnswerKey,
   parseSerializedResponse,
 } from '../utils/testScoringEngine';
+import {
+  formatQuestionKeySeed,
+  parseManualAnswerInput,
+} from '../utils/communityKeys';
 import type { SubjectFetchResult, UrlIngestResult } from '../hooks/useWarRoomStore';
 import { PyqTestBuilder, type SessionMode } from './PyqTestBuilder';
 import { PyqCbtSession, type ActiveCbtSession, type UserResponse } from './PyqCbtSession';
@@ -240,6 +245,8 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
   const [moreToolsOpen, setMoreToolsOpen] = useState<boolean>(false);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
   const [historyKeyDrafts, setHistoryKeyDrafts] = useState<Record<string, string>>({});
+  const [historyNoteDrafts, setHistoryNoteDrafts] = useState<Record<string, string>>({});
+  const [historyEditingKeyIds, setHistoryEditingKeyIds] = useState<Record<string, boolean>>({});
   const [historyVerifyingIds, setHistoryVerifyingIds] = useState<Record<string, boolean>>({});
   const [historyKeySaved, setHistoryKeySaved] = useState<Record<string, boolean>>({});
 
@@ -574,59 +581,35 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
 
   const handleSaveHistoryKey = useCallback(
     async (q: Question) => {
-      const raw = (historyKeyDrafts[q.id] ?? '').trim();
+      const raw = (historyKeyDrafts[q.id] ?? formatQuestionKeySeed(q)).trim();
       if (!raw) return;
 
-      let record: Omit<VerifiedAnswerRecord, 'updatedAt'> | null = null;
-      if (q.format === 'MCQ') {
-        const clean = raw.toUpperCase().replace(/[^A-E]/g, '').slice(0, 1);
-        if (!clean) return;
-        record = {
-          questionId: q.id,
-          format: 'MCQ',
-          correctOption: clean,
-          explanation: q.explanation || 'Official answer key saved by user.',
-          wrongOptionAnalysis: q.wrongOptionAnalysis || '',
-          source: 'manual',
-        };
-      } else if (q.format === 'MSQ') {
-        const cleanList = Array.from(
-          new Set(
-            raw
-              .toUpperCase()
-              .split(/[\s,;]+/)
-              .map((x) => x.replace(/[^A-E]/g, '').slice(0, 1))
-              .filter((x) => /^[A-E]$/.test(x))
-          )
-        ).sort();
-        if (cleanList.length === 0) return;
-        record = {
-          questionId: q.id,
-          format: 'MSQ',
-          correctOptions: cleanList,
-          explanation: q.explanation || 'Official MSQ answer key saved by user.',
-          wrongOptionAnalysis: q.wrongOptionAnalysis || '',
-          source: 'manual',
-        };
-      } else {
-        const num = Number(raw);
-        if (!Number.isFinite(num)) return;
-        record = {
-          questionId: q.id,
-          format: 'NAT',
-          natAnswer: num,
-          natTolerance: 0.01,
-          explanation: q.explanation || 'Official NAT answer key saved by user.',
-          wrongOptionAnalysis: q.wrongOptionAnalysis || '',
-          source: 'manual',
-        };
-      }
+      const parsed = parseManualAnswerInput(q.format, raw);
+      if (!parsed) return;
+
+      const draftNote = (historyNoteDrafts[q.id] ?? '').trim();
+      const explanation = draftNote || q.explanation || '';
+
+      const record: Omit<VerifiedAnswerRecord, 'updatedAt'> = {
+        questionId: q.id,
+        format: parsed.format,
+        correctOption: parsed.correctOption,
+        correctOptions: parsed.correctOptions,
+        natAnswer: parsed.natAnswer,
+        natRangeMin: parsed.natRangeMin,
+        natRangeMax: parsed.natRangeMax,
+        natTolerance: parsed.natTolerance,
+        explanation,
+        wrongOptionAnalysis: q.wrongOptionAnalysis || '',
+        source: 'manual',
+      };
 
       await onSaveVerifiedAnswer(record);
+      setHistoryEditingKeyIds((prev) => ({ ...prev, [q.id]: false }));
       setHistoryKeySaved((prev) => ({ ...prev, [q.id]: true }));
       onNotify?.('Official answer key saved — test scores & analytics updated.');
     },
-    [historyKeyDrafts, onSaveVerifiedAnswer, onNotify]
+    [historyKeyDrafts, historyNoteDrafts, onSaveVerifiedAnswer, onNotify]
   );
 
   const handleAiVerifyHistoryQuestion = useCallback(
@@ -1082,14 +1065,10 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
                           const ev = evaluateQuestionStrict(q, respObj);
                           const hasKey = hasVerifiedAnswerKey(q);
                           const isVerifying = Boolean(historyVerifyingIds[q.id]);
-                          const keyDisplay =
-                            q.format === 'MCQ'
-                              ? q.correctOption ?? ''
-                              : q.format === 'MSQ'
-                              ? q.correctOptions?.join(', ') ?? ''
-                              : q.natAnswer !== undefined
-                              ? String(q.natAnswer)
-                              : '';
+                          const keyDisplay = formatQuestionKeySeed(q);
+                          const isEditingHistoryKey = Boolean(historyEditingKeyIds[q.id]);
+                          const updatedByName =
+                            q.verifiedByName || state.verifiedAnswers[q.id]?.updatedByName || '';
 
                           return (
                             <div
@@ -1134,6 +1113,47 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
                                       Key: {keyDisplay}
                                     </span>
                                   )}
+                                  <button
+                                    type="button"
+                                    data-testid={`history-toggle-key-btn-${q.id}`}
+                                    onClick={() => {
+                                      if (!hasKey) {
+                                        const el = document.querySelector<HTMLInputElement>(
+                                          `[data-testid="history-key-input-${q.id}"]`
+                                        );
+                                        el?.focus();
+                                        return;
+                                      }
+                                      setHistoryEditingKeyIds((prev) => ({
+                                        ...prev,
+                                        [q.id]: !prev[q.id],
+                                      }));
+                                      setHistoryKeyDrafts((prev) => ({
+                                        ...prev,
+                                        [q.id]: prev[q.id] ?? keyDisplay,
+                                      }));
+                                      setHistoryNoteDrafts((prev) => ({
+                                        ...prev,
+                                        [q.id]: prev[q.id] ?? (q.explanation || ''),
+                                      }));
+                                    }}
+                                    className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full font-sans text-[11px] font-semibold press-tactile ${
+                                      hasKey
+                                        ? 'border border-[#E8E0D5] dark:border-[#352A24] bg-[#FFFFFF] dark:bg-[#1C1714] text-[#61554D] dark:text-[#D8CBB8] hover:border-[#C89216]'
+                                        : 'border border-[#C89216] bg-[#FDF6E3] dark:bg-[#2C2215] text-[#8B6209] dark:text-[#E0A92E]'
+                                    }`}
+                                  >
+                                    {hasKey ? (
+                                      <Pencil className="h-3 w-3" />
+                                    ) : (
+                                      <KeyRound className="h-3 w-3" />
+                                    )}
+                                    {hasKey
+                                      ? isEditingHistoryKey
+                                        ? 'Cancel'
+                                        : 'Edit Key'
+                                      : 'Add Official Key'}
+                                  </button>
                                   {hasGateOverflowUrl(q) && (
                                     <a
                                       href={q.sourceUrl}
@@ -1147,57 +1167,82 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
                                 </div>
                               </div>
 
-                              {/* Inline Official Key Input + Verify with AI */}
-                              <div className="flex flex-wrap items-center gap-2 pt-1.5 border-t border-[#E8E0D5]/70 dark:border-[#352A24]">
-                                <input
-                                  type="text"
-                                  aria-label={`Official answer key for Q${qIdx + 1}`}
-                                  data-testid={`history-key-input-${q.id}`}
-                                  value={historyKeyDrafts[q.id] ?? keyDisplay}
-                                  onChange={(e) =>
-                                    setHistoryKeyDrafts((prev) => ({
-                                      ...prev,
-                                      [q.id]: e.target.value,
-                                    }))
-                                  }
-                                  placeholder={
-                                    q.format === 'MCQ'
-                                      ? 'Key (e.g. B)'
-                                      : q.format === 'MSQ'
-                                      ? 'Keys (e.g. A, C)'
-                                      : 'NAT value (e.g. 42.5)'
-                                  }
-                                  className="h-8 w-36 px-3 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FFFFFF] dark:bg-[#130F0D] font-mono text-xs text-[#1C1613] dark:text-[#F5F0E8]"
-                                />
-                                <button
-                                  type="button"
-                                  data-testid={`history-save-key-btn-${q.id}`}
-                                  onClick={() => void handleSaveHistoryKey(q)}
-                                  className="h-8 px-3 rounded-full border border-[#C89216] bg-[#FDF6E3] dark:bg-[#2C2215] text-xs font-semibold text-[#8B6209] dark:text-[#E0A92E] press-tactile"
+                              {hasKey && updatedByName && (
+                                <p
+                                  data-testid={`history-key-attribution-${q.id}`}
+                                  className="text-[11px] text-[#8C7E75] dark:text-[#A99B8E]"
                                 >
-                                  {hasKey ? 'Update Key' : 'Save Official Key'}
-                                </button>
-                                {!hasKey && (
+                                  Official Key · Updated by {updatedByName}
+                                </p>
+                              )}
+
+                              {/* Inline Shared Community Official Key Editor */}
+                              {(!hasKey || isEditingHistoryKey) && (
+                                <div className="flex flex-wrap items-center gap-2 pt-1.5 border-t border-[#E8E0D5]/70 dark:border-[#352A24]">
+                                  <input
+                                    type="text"
+                                    aria-label={`Official answer key for Q${qIdx + 1}`}
+                                    data-testid={`history-key-input-${q.id}`}
+                                    value={historyKeyDrafts[q.id] ?? keyDisplay}
+                                    onChange={(e) =>
+                                      setHistoryKeyDrafts((prev) => ({
+                                        ...prev,
+                                        [q.id]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder={
+                                      q.format === 'MCQ'
+                                        ? 'Key (e.g. B)'
+                                        : q.format === 'MSQ'
+                                        ? 'Keys (e.g. A, C)'
+                                        : 'NAT (e.g. 42.5 or 42 to 43)'
+                                    }
+                                    className="h-8 w-40 px-3 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FFFFFF] dark:bg-[#130F0D] font-mono text-xs text-[#1C1613] dark:text-[#F5F0E8]"
+                                  />
+                                  <input
+                                    type="text"
+                                    aria-label={`Official note for Q${qIdx + 1}`}
+                                    data-testid={`history-note-input-${q.id}`}
+                                    value={historyNoteDrafts[q.id] ?? ''}
+                                    onChange={(e) =>
+                                      setHistoryNoteDrafts((prev) => ({
+                                        ...prev,
+                                        [q.id]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="Optional short official note..."
+                                    className="h-8 flex-1 min-w-[180px] px-3 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FFFFFF] dark:bg-[#130F0D] text-xs text-[#1C1613] dark:text-[#F5F0E8]"
+                                  />
                                   <button
                                     type="button"
-                                    disabled={isVerifying}
-                                    onClick={() => void handleAiVerifyHistoryQuestion(q)}
-                                    className="inline-flex items-center gap-1 h-8 px-3 rounded-full bg-[#241914] dark:bg-[#E0A92E] text-[#FAF5EB] dark:text-[#1C1613] text-xs font-semibold disabled:opacity-50 press-tactile"
+                                    data-testid={`history-save-key-btn-${q.id}`}
+                                    onClick={() => void handleSaveHistoryKey(q)}
+                                    className="h-8 px-3 rounded-full border border-[#C89216] bg-[#FDF6E3] dark:bg-[#2C2215] text-xs font-semibold text-[#8B6209] dark:text-[#E0A92E] press-tactile"
                                   >
-                                    {isVerifying ? (
-                                      <RefreshCw className="h-3 w-3 animate-spin" />
-                                    ) : (
-                                      <Sparkles className="h-3 w-3" />
-                                    )}
-                                    {isVerifying ? 'Verifying...' : 'Verify with AI'}
+                                    {hasKey ? 'Update Key' : 'Save Official Key'}
                                   </button>
-                                )}
-                                {historyKeySaved[q.id] && (
-                                  <span className="text-[11px] font-semibold text-[#2E5E3E] dark:text-[#7BB88F]">
-                                    Recalculated!
-                                  </span>
-                                )}
-                              </div>
+                                  {!hasKey && (
+                                    <button
+                                      type="button"
+                                      disabled={isVerifying}
+                                      onClick={() => void handleAiVerifyHistoryQuestion(q)}
+                                      className="inline-flex items-center gap-1 h-8 px-3 rounded-full bg-[#241914] dark:bg-[#E0A92E] text-[#FAF5EB] dark:text-[#1C1613] text-xs font-semibold disabled:opacity-50 press-tactile"
+                                    >
+                                      {isVerifying ? (
+                                        <RefreshCw className="h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <Sparkles className="h-3 w-3" />
+                                      )}
+                                      {isVerifying ? 'Verifying...' : 'Verify with AI'}
+                                    </button>
+                                  )}
+                                  {historyKeySaved[q.id] && (
+                                    <span className="text-[11px] font-semibold text-[#2E5E3E] dark:text-[#7BB88F]">
+                                      Recalculated!
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           );
                         })}
