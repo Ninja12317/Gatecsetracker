@@ -219,12 +219,12 @@ export const CodeVisualizerPanel: React.FC<CodeVisualizerPanelProps> = ({
         setCurrentStepIdx(0);
         setZoom(1);
         setPan({ x: 0, y: 0 });
-        setAiNotice(`Deep AI Trace (${data.modelUsed || 'Free Tier'}) · ${data.frames.length} steps`);
+        setAiNotice(`Deep AI Trace · ${data.frames.length} steps`);
       } else {
-        setAiNotice(data.error || 'Deep AI Trace unavailable · Running Fast Local Interpreter.');
+        setAiNotice(data.error || 'Deep AI Trace unavailable · Running Built-in Interpreter.');
       }
     } catch {
-      setAiNotice('Offline · Using Fast Local Interpreter (₹0).');
+      setAiNotice('Offline · Using Built-in Interpreter.');
     } finally {
       setAiLoading(false);
     }
@@ -347,7 +347,7 @@ export const CodeVisualizerPanel: React.FC<CodeVisualizerPanelProps> = ({
               className="inline-flex items-center gap-1 h-7 px-3 rounded-full bg-[#C89216] hover:bg-[#B28012] text-[#1C1613] text-[11px] font-bold press-tactile"
             >
               <Play className="h-3 w-3 fill-current" />
-              Run Local (₹0)
+              Run Code
             </button>
             <button
               type="button"

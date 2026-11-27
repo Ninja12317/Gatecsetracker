@@ -74,5 +74,6 @@ export function createInitialWarRoomState(): WarRoomState {
     vaultPacks: [],
     srsCards: {},
     mocks: [],
+    testHistory: [],
   };
 }

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   SlidersHorizontal,
   PenLine,
+  Pencil,
   Loader2,
   ChevronDown,
   ChevronUp,
@@ -54,6 +55,7 @@ interface MockAnalyticsViewProps {
   theme: 'light' | 'dark';
   accentTheme?: AccentThemeId;
   onAddMock: (mock: Omit<MockTestEntry, 'id'>) => void;
+  onUpdateMock?: (mockId: string, mock: Omit<MockTestEntry, 'id'>) => void;
   onDeleteMock: (mockId: string) => void;
   onExportMockPdf?: () => void;
 }
@@ -102,12 +104,15 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
   theme,
   accentTheme = 'brown',
   onAddMock,
+  onUpdateMock,
   onDeleteMock,
   onExportMockPdf,
 }) => {
+  const loggerSectionRef = useRef<HTMLElement | null>(null);
   const [loggerMode, setLoggerMode] = useState<LoggerMode>('paste');
   const [rawPaste, setRawPaste] = useState('');
   const [previewDraft, setPreviewDraft] = useState<ParsedMockDraft | null>(null);
+  const [editingMockId, setEditingMockId] = useState<string | null>(null);
   const [parseMeta, setParseMeta] = useState<{
     confidence: 'high' | 'medium' | 'low';
     matchedFormat: string;
@@ -179,7 +184,7 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
     [diagnostics.progressionSeries]
   );
 
-  // Layer 2 Free-Tier Gemini Refinement
+  // Layer 2 AI Refinement
   const triggerAiRefinement = async (sourceText: string, baseDraft?: ParsedMockDraft) => {
     const trimmed = sourceText.trim();
     if (trimmed.length < 10) return;
@@ -190,7 +195,7 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
       parseMs: prev?.parseMs ?? 0,
       warnings: prev?.warnings ?? [],
       isAiRefining: true,
-      aiStatusMessage: 'Refining with Free-Tier Gemini (gemini-2.5-flash-lite)...',
+      aiStatusMessage: 'Refining extracted fields with AI...',
     }));
 
     try {
@@ -220,31 +225,31 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
         );
         setParseMeta({
           confidence: 'high',
-          matchedFormat: 'Free-Tier AI Extraction',
+          matchedFormat: 'AI Extraction',
           parseMs: 0,
           warnings: [],
           isAiRefining: false,
-          aiStatusMessage: 'Parsed via Free-Tier AI · Review and confirm below.',
+          aiStatusMessage: 'Parsed with AI · Review and confirm below.',
         });
       } else {
         setParseMeta((prev) => ({
           confidence: prev?.confidence ?? 'medium',
-          matchedFormat: prev?.matchedFormat ?? 'Local Deterministic Parser',
+          matchedFormat: prev?.matchedFormat ?? 'Smart Parser',
           parseMs: prev?.parseMs ?? 0,
           warnings: prev?.warnings ?? [],
           isAiRefining: false,
           aiStatusMessage:
-            data.message ?? 'Free-Tier AI unavailable · Using local preview (editable below).',
+            data.message ?? 'AI refinement unavailable · Using instant preview (editable below).',
         }));
       }
     } catch {
       setParseMeta((prev) => ({
         confidence: prev?.confidence ?? 'medium',
-        matchedFormat: prev?.matchedFormat ?? 'Local Deterministic Parser',
+        matchedFormat: prev?.matchedFormat ?? 'Smart Parser',
         parseMs: prev?.parseMs ?? 0,
         warnings: prev?.warnings ?? [],
         isAiRefining: false,
-        aiStatusMessage: 'Network error reaching Free-Tier AI · Edit preview fields manually.',
+        aiStatusMessage: 'Could not reach AI refinement · Edit preview fields manually.',
       }));
     }
   };
@@ -293,6 +298,7 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
 
   const handleSwitchMode = (mode: LoggerMode) => {
     setLoggerMode(mode);
+    setEditingMockId(null);
     setFormError('');
     if (mode === 'manual') {
       if (!previewDraft || previewDraft.parseSource !== 'manual') {
@@ -302,6 +308,60 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
     } else if (previewDraft?.parseSource === 'manual' && !rawPaste.trim()) {
       setPreviewDraft(null);
     }
+  };
+
+  const handleStartEditMock = (mock: MockTestEntry) => {
+    setEditingMockId(mock.id);
+    setLoggerMode('manual');
+    setParseMeta(null);
+    setFormError('');
+    setSavedBanner(null);
+    setPreviewDraft({
+      name: mock.name,
+      source: mock.source || 'GATE Test Series',
+      subjectId: mock.subjectId ?? 'all',
+      date: mock.date,
+      type: mock.type,
+      score: mock.score,
+      maxScore: mock.maxScore,
+      normalizedScore: mock.normalizedScore ?? getNormalizedMockPct(mock),
+      percentage: mock.percentage ?? getNormalizedMockPct(mock),
+      accuracy: mock.accuracy,
+      totalQuestions: mock.totalQuestions,
+      attempted: mock.attempted,
+      correct: mock.correct,
+      wrong: mock.wrong,
+      unattempted: mock.unattempted,
+      q1Attempted: mock.q1Attempted,
+      q2Attempted: mock.q2Attempted,
+      q1Correct: mock.q1Correct,
+      q2Correct: mock.q2Correct,
+      q1Wrong: mock.q1Wrong,
+      q2Wrong: mock.q2Wrong,
+      q1Total: mock.q1Total,
+      q2Total: mock.q2Total,
+      positiveMarks: mock.positiveMarks,
+      penaltyMarks: mock.penaltyMarks,
+      q1PositiveMarks: mock.q1PositiveMarks,
+      q2PositiveMarks: mock.q2PositiveMarks,
+      q1PenaltyMarks: mock.q1PenaltyMarks,
+      q2PenaltyMarks: mock.q2PenaltyMarks,
+      durationMinutes: mock.durationMinutes,
+      timeTakenMinutes: mock.timeTakenMinutes,
+      rank: mock.rank,
+      totalCandidates: mock.totalCandidates,
+      percentile: mock.percentile,
+      parseSource: mock.parseSource ?? 'manual',
+      notes: mock.notes ?? '',
+    });
+    setShowAdvancedSplit(
+      mock.penaltyMarks !== undefined ||
+        mock.q1Attempted !== undefined ||
+        mock.q2Attempted !== undefined ||
+        mock.timeTakenMinutes !== undefined ||
+        mock.rank !== undefined
+    );
+    loggerSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const updateDraftField = <K extends keyof ParsedMockDraft>(
@@ -377,7 +437,7 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
           )
         : 0;
 
-    onAddMock({
+    const payload: Omit<MockTestEntry, 'id'> = {
       name: trimmedName,
       source: previewDraft.source.trim() || 'GATE Test Series',
       subjectId: previewDraft.type === 'Full-Length Mock' ? 'all' : previewDraft.subjectId,
@@ -417,13 +477,23 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
       percentile: previewDraft.percentile,
       parseSource: previewDraft.parseSource,
       notes: previewDraft.notes.trim(),
-    });
+    };
 
-    setSavedBanner(
-      `Logged "${trimmedName}" (${previewDraft.score}/${previewDraft.maxScore} · ${normalizedScore.toFixed(1)}%).`
-    );
+    if (editingMockId && onUpdateMock) {
+      onUpdateMock(editingMockId, payload);
+      setSavedBanner(
+        `Updated "${trimmedName}" (${previewDraft.score}/${previewDraft.maxScore} · ${normalizedScore.toFixed(1)}%).`
+      );
+      setEditingMockId(null);
+      setPreviewDraft(null);
+    } else {
+      onAddMock(payload);
+      setSavedBanner(
+        `Logged "${trimmedName}" (${previewDraft.score}/${previewDraft.maxScore} · ${normalizedScore.toFixed(1)}%).`
+      );
+      setPreviewDraft(loggerMode === 'manual' ? createEmptyManualDraft() : null);
+    }
     setRawPaste('');
-    setPreviewDraft(loggerMode === 'manual' ? createEmptyManualDraft() : null);
     setParseMeta(null);
     setShowAdvancedSplit(false);
   };
@@ -431,7 +501,10 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
   return (
     <div className="space-y-6">
       {/* 1. SMART PASTE AUTO-LOGGER CARD */}
-      <section className="rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-6 shadow-warm space-y-5">
+      <section
+        ref={loggerSectionRef}
+        className="rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-6 shadow-warm space-y-5"
+      >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-3.5">
             <div className="h-11 w-11 rounded-[16px] bg-[#6E261A] dark:bg-[#9E3E2E] text-white flex items-center justify-center shrink-0 shadow-sm">
@@ -447,7 +520,7 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
                 </span>
               </div>
               <p className="text-xs text-[#61554D] dark:text-[#A99B8E] mt-0.5">
-                Copy-paste your raw Exam Summary directly — parsed instantly at 0ms locally (₹0), with optional Free-Tier AI fallback.
+                Copy-paste your raw Exam Summary directly — parsed instantly with optional AI refinement.
               </p>
             </div>
           </div>
@@ -560,7 +633,11 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-[#E8E0D5] dark:border-[#2E2520]">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-display text-sm font-bold text-[#1C1613] dark:text-[#F5F0E8]">
-                  {loggerMode === 'manual' ? 'Manual Test Entry' : 'Parsed Result Preview'}
+                  {editingMockId
+                    ? `Editing: ${previewDraft.name || 'Logged Test'}`
+                    : loggerMode === 'manual'
+                    ? 'Manual Test Entry'
+                    : 'Parsed Result Preview'}
                 </span>
                 {parseMeta && (
                   <span
@@ -572,8 +649,8 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-current" />
                     {previewDraft.parseSource === 'ai_free_tier'
-                      ? 'Parsed via Free-Tier AI · ₹0'
-                      : `Parsed Locally · ${parseMeta.parseMs}ms · ₹0`}
+                      ? 'Parsed with AI'
+                      : `Parsed Instantly · ${parseMeta.parseMs}ms`}
                   </span>
                 )}
                 {parseMeta && (
@@ -595,7 +672,7 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
                   ) : (
                     <Sparkles className="h-3.5 w-3.5" />
                   )}
-                  {parseMeta?.isAiRefining ? 'Refining...' : 'Refine with Free-Tier AI'}
+                  {parseMeta?.isAiRefining ? 'Refining...' : 'Refine with AI'}
                 </button>
               )}
             </div>
@@ -778,7 +855,7 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
                   onChange={(e) => updateDraftField('subjectId', e.target.value as MockSubjectId)}
                   className="w-full h-10 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] px-4 text-xs text-[#1C1613] dark:text-[#F5F0E8]"
                 >
-                  <option value="all">Full Syllabus (All 11 Subjects)</option>
+                  <option value="all">Full Syllabus (All 12 Subjects)</option>
                   {GATE_2027_SYLLABUS.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.code} — {s.name}
@@ -1120,19 +1197,21 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
                 type="button"
                 onClick={() => {
                   setPreviewDraft(null);
+                  setEditingMockId(null);
                   setParseMeta(null);
                   setFormError('');
                 }}
                 className="px-4 py-2 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] text-xs font-semibold text-[#61554D] dark:text-[#A99B8E] hover:bg-[#FFFFFF] dark:hover:bg-[#1C1714]"
               >
-                Discard
+                {editingMockId ? 'Cancel Edit' : 'Discard'}
               </button>
               <button
                 type="submit"
+                data-testid="mock-confirm-save-btn"
                 className="inline-flex items-center gap-1.5 px-6 py-2.5 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] dark:hover:bg-[#B24735] text-white text-xs font-semibold press-tactile shadow-sm"
               >
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                Confirm &amp; Save
+                {editingMockId ? 'Save Changes' : 'Confirm & Save'}
               </button>
             </div>
           </form>
@@ -1586,7 +1665,7 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
             Subject Mastery &amp; Mock Performance vs. GATE Weightage (ROI Matrix)
           </h3>
           <p className="text-xs text-[#61554D] dark:text-[#A99B8E] mt-0.5">
-            Compare syllabus mastery (%), subject/topic mock average (%), and official IITM GATE weightage across all 11 subjects
+            Compare syllabus mastery (%), subject/topic mock average (%), and official IITM GATE weightage across all 12 subjects
           </p>
         </div>
 
@@ -1666,7 +1745,7 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
               Logged Tests Archive
             </h3>
             <p className="text-[11px] text-[#61554D] dark:text-[#A99B8E]">
-              Synced to Cloud Firestore · Showing {filteredMocks.length} of {mocks.length} logged test
+              Auto-synced · Showing {filteredMocks.length} of {mocks.length} logged test
               {mocks.length === 1 ? '' : 's'}
             </p>
           </div>
@@ -1793,15 +1872,28 @@ export const MockAnalyticsView: React.FC<MockAnalyticsViewProps> = ({
                           </div>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => onDeleteMock(m.id)}
-                          aria-label={`Delete mock test ${m.name}`}
-                          className="p-1.5 rounded-full text-[#8C7E75] hover:text-[#B83227] hover:bg-[#FBEAE8] dark:hover:bg-[#3A1E1B]"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center justify-end gap-1">
+                          {onUpdateMock && (
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditMock(m)}
+                              data-testid={`edit-mock-btn-${m.id}`}
+                              aria-label={`Edit mock test ${m.name}`}
+                              className="p-1.5 rounded-full text-[#8C7E75] hover:text-[#6E261A] dark:hover:text-[#E0A92E] hover:bg-[#FAF8F4] dark:hover:bg-[#2A201B]"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => onDeleteMock(m.id)}
+                            aria-label={`Delete mock test ${m.name}`}
+                            className="p-1.5 rounded-full text-[#8C7E75] hover:text-[#B83227] hover:bg-[#FBEAE8] dark:hover:bg-[#3A1E1B]"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

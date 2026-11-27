@@ -23,6 +23,7 @@ import { CodeBlock } from './CodeBlock';
 import { FormulaBlock, MathText } from './MathText';
 import { toLocalIsoDate } from '../utils/gateMath';
 import { isSrsCardDueToday, makeSrsCardId } from '../utils/examPolish';
+import { hasGateOverflowUrl } from '../utils/subjectMigration';
 
 interface RapidRevisionViewProps {
   state: WarRoomState;
@@ -84,12 +85,16 @@ export const RapidRevisionView: React.FC<RapidRevisionViewProps> = ({
       const subj = SUBJECT_MAP[q.subjectId];
       const answerStr =
         q.format === 'MCQ'
-          ? `Option ${q.correctOption || 'Verify on GateOverflow'}`
+          ? q.correctOption
+            ? `Option ${q.correctOption}`
+            : 'Pending Answer Key'
           : q.format === 'MSQ'
-          ? `Options ${q.correctOptions?.join(', ') || 'Verify on GateOverflow'}`
+          ? q.correctOptions && q.correctOptions.length > 0
+            ? `Options ${q.correctOptions.join(', ')}`
+            : 'Pending Answer Key'
           : typeof q.natAnswer === 'number'
           ? `${q.natAnswer}${q.natUnit ? ` ${q.natUnit}` : ''}`
-          : 'Verify on GateOverflow';
+          : 'Pending Answer Key';
 
       cards.push({
         cardId,
@@ -103,10 +108,15 @@ export const RapidRevisionView: React.FC<RapidRevisionViewProps> = ({
         frontText: q.prompt,
         codeSnippet: q.codeSnippet,
         answerHeadline: `${q.format} (${q.marks}M) · Answer: ${answerStr}`,
-        backDetail: q.explanation || q.wrongOptionAnalysis || 'Review official proof via GateOverflow.',
+        backDetail:
+          q.explanation ||
+          q.wrongOptionAnalysis ||
+          (hasGateOverflowUrl(q)
+            ? 'Review official proof via GateOverflow.'
+            : 'Review concept notes and verify official answer key in PYQ Studio.'),
         extraNote: m.userNote || undefined,
         sketchDataUrl: state.savedSketches[q.id],
-        sourceUrl: q.sourceUrl,
+        sourceUrl: hasGateOverflowUrl(q) ? q.sourceUrl : undefined,
         dueToday: isSrsCardDueToday(srs, todayIso),
         intervalDays: srs?.intervalDays,
         reviewCount: srs?.reviewCount ?? 0,
@@ -402,7 +412,7 @@ export const RapidRevisionView: React.FC<RapidRevisionViewProps> = ({
                         />
                       </div>
                     )}
-                    {activeCard.sourceUrl && (
+                    {activeCard.sourceUrl && hasGateOverflowUrl({ sourceUrl: activeCard.sourceUrl }) && (
                       <a
                         href={activeCard.sourceUrl}
                         target="_blank"

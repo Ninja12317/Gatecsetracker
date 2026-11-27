@@ -39,9 +39,10 @@ test('Firestore rules cover every collection in firebase-blueprint.json', () => 
     'vault_packs/{packId}',
     'daily_progress/{docId}',
     'rough_work/{docId}',
+    'test_history/{testId}',
   ];
 
-  assert.equal(Object.keys(blueprint.firestore).length, 18);
+  assert.equal(Object.keys(blueprint.firestore).length, 19);
   for (const sub of subcollections) {
     assert.ok(rules.includes(`match /${sub}`), `Missing match block for /${sub}`);
   }
@@ -84,4 +85,10 @@ test('Dirty Dozen security assertions are enforced in rules', () => {
     )
   );
   assert.ok(rules.includes("isOptionalBoundedNumber(data, 'accentUpdatedAt', 0, 9999999999999)"));
+
+  // 9. 12-subject split (cprog + ds) and test_history + mocks update hardening
+  assert.ok(rules.includes("'cprog'") && rules.includes("'ds'"));
+  assert.ok(rules.includes('function isValidTestHistory('));
+  assert.ok(rules.includes('function isValidMockTest('));
+  assert.ok(rules.includes('&& isValidMockTest(incoming(), userId)'));
 });

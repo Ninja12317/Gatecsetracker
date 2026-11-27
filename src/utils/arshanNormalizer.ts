@@ -6,6 +6,7 @@ import type {
   QuestionSourceCategory,
   SubjectId,
 } from '../types/index.ts';
+import { classifyPdsToCprogOrDs } from './subjectMigration.ts';
 
 export interface ArshanPyqKeyRecord {
   paper: string;
@@ -103,13 +104,23 @@ export function normalizeCanonicalSubjectId(
     return { subjectId: 'coa', extraTags: [] };
   }
   if (
-    s === 'pds' ||
-    s.includes('programming') ||
-    s.includes('data structure') ||
+    s === 'cprog' ||
     s === 'c programming' ||
-    s === 'ds'
+    s === 'programming in c' ||
+    s === 'c' ||
+    (s.includes('programming') && !s.includes('data structure'))
   ) {
-    return { subjectId: 'pds', extraTags: [] };
+    return { subjectId: 'cprog', extraTags: ['c-programming'] };
+  }
+  if (s === 'ds' || s === 'dsa' || (s.includes('data structure') && !s.includes('programming'))) {
+    return { subjectId: 'ds', extraTags: ['data-structures'] };
+  }
+  if (s === 'pds' || (s.includes('programming') && s.includes('data structure'))) {
+    const resolved = classifyPdsToCprogOrDs({ subtopic: rawTopic, text: rawText });
+    return {
+      subjectId: resolved,
+      extraTags: [resolved === 'cprog' ? 'c-programming' : 'data-structures'],
+    };
   }
   if (s === 'algo' || s === 'algos' || s.includes('algorithm')) {
     return { subjectId: 'algo', extraTags: [] };
@@ -168,8 +179,11 @@ export function normalizeCanonicalSubjectId(
   if (/\b(asymptotic|dynamic programming|dijkstra|kruskal|quicksort|mergesort|np-complete|mst|recurrence|shortest path)\b/.test(hay)) {
     return { subjectId: 'algo', extraTags: [] };
   }
-  if (/\b(#include|printf|malloc|pointer|linked list|bst|avl|heap|stack|queue|recursion)\b/.test(hay)) {
-    return { subjectId: 'pds', extraTags: [] };
+  if (/\b(#include|printf|malloc|pointer|recursion|static\s+int|sizeof|struct)\b/.test(hay)) {
+    return { subjectId: 'cprog', extraTags: ['c-programming'] };
+  }
+  if (/\b(linked list|bst|avl|heap|stack|queue|binary tree|hashing|adjacency list)\b/.test(hay)) {
+    return { subjectId: 'ds', extraTags: ['data-structures'] };
   }
   if (/\b(eigenvalue|matrix|determinant|probability|bayes|integral|calculus|limit|derivative)\b/.test(hay)) {
     return { subjectId: 'em', extraTags: [] };

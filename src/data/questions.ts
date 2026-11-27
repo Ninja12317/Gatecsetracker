@@ -328,15 +328,15 @@ I4: AND R7, R5, R1`,
       'Option B describes DMA Burst Mode, NOT Cycle Stealing! In Cycle Stealing, the DMA controller takes only one bus cycle per word transfer and yields the bus back to the CPU.',
   },
 
-  // ===================== PROGRAMMING & DATA STRUCTURES (4) =====================
+  // ===================== C PROGRAMMING (2) & DATA STRUCTURES (2) =====================
   {
     id: 'q-pds-1',
-    subjectId: 'pds',
+    subjectId: 'cprog',
     subtopic: 'C Programming · Double Pointers',
     format: 'MCQ',
     marks: 2,
     difficulty: 'Medium',
-    sourceTag: 'PYQ Pattern · PDS',
+    sourceTag: 'PYQ Pattern · C',
     prompt: 'What is the output of the following C program?',
     codeSnippet: `#include <stdio.h>
 int main(void) {
@@ -361,12 +361,12 @@ int main(void) {
   },
   {
     id: 'q-pds-2',
-    subjectId: 'pds',
+    subjectId: 'cprog',
     subtopic: 'C Programming · Recursion & Static Storage',
     format: 'NAT',
     marks: 2,
     difficulty: 'Hard',
-    sourceTag: 'PYQ Pattern · PDS',
+    sourceTag: 'PYQ Pattern · C',
     prompt: 'What integer value is returned by calling f(5) in the following C function?',
     codeSnippet: `int f(int n) {
     static int r = 0;
@@ -386,12 +386,12 @@ int main(void) {
   },
   {
     id: 'q-pds-3',
-    subjectId: 'pds',
+    subjectId: 'ds',
     subtopic: 'Trees · BST Counting',
     format: 'NAT',
     marks: 1,
     difficulty: 'Easy',
-    sourceTag: 'PYQ Pattern · PDS',
+    sourceTag: 'PYQ Pattern · DS',
     prompt:
       'How many structurally distinct Binary Search Trees (BSTs) can be formed using the 4 distinct keys {10, 20, 30, 40}?',
     natAnswer: 14,
@@ -403,7 +403,7 @@ int main(void) {
   },
   {
     id: 'q-pds-4',
-    subjectId: 'pds',
+    subjectId: 'ds',
     subtopic: 'Heaps & Balanced Trees',
     format: 'MSQ',
     marks: 2,
@@ -931,7 +931,7 @@ printf("G");`,
   },
   {
     id: 'q-pds-5',
-    subjectId: 'pds',
+    subjectId: 'ds',
     subtopic: 'Data Structures · Stack Permutations',
     format: 'MCQ',
     marks: 2,

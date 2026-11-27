@@ -258,7 +258,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
               </p>
               <ul className="list-disc pl-4 space-y-1">
                 <li>Countdown phase, active study streak &amp; total deep-work hours</li>
-                <li>All 11 GATE CSE subjects weighted mastery table</li>
+                <li>All 12 GATE CSE subjects weighted mastery table</li>
                 <li>Mock test performance summary &amp; priority weak areas</li>
               </ul>
             </div>

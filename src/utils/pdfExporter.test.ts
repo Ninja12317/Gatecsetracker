@@ -122,6 +122,7 @@ function makeMinimalState(): WarRoomState {
         notes: 'Solid accuracy on combinatorics',
       },
     ],
+    testHistory: [],
   };
 }
 

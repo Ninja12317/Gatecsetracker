@@ -657,7 +657,7 @@ export const TocStudioPanel: React.FC = () => {
           })}
         </div>
         <span className="hidden md:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-semibold bg-[#FDF6E3] dark:bg-[#2C2215] text-[#8B6209] dark:text-[#E0A92E] border border-[#EED89A] dark:border-[#6B5016] shrink-0 whitespace-nowrap">
-          100% Client-Side Engine · ₹0 Cost
+          Interactive Automata Engine
         </span>
       </div>
 
@@ -1880,7 +1880,7 @@ export const TocStudioPanel: React.FC = () => {
                   Chomsky Hierarchy <span className="text-[#6E261A] dark:text-[#E0A92E]">Language Classifier</span>
                 </h2>
                 <p className="text-xs text-[#61554D] dark:text-[#A99B8E]">
-                  28 curated GATE CSE languages offline + instant Free-Tier AI proof analyzer for custom languages
+                  28 curated GATE CSE languages built in + instant AI proof analyzer for custom languages
                 </p>
               </div>
             </div>

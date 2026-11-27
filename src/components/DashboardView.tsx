@@ -311,7 +311,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="rounded-[20px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] p-4">
                 <div className="flex items-center justify-between text-[11px] font-medium text-[#61554D] dark:text-[#A99B8E]">
                   <span>Syllabus Mastery</span>
-                  <span className="font-mono text-[#B58210] dark:text-[#E0A92E]">11 Subj</span>
+                  <span className="font-mono text-[#B58210] dark:text-[#E0A92E]">12 Subj</span>
                 </div>
                 {isConnecting ? (
                   <div className="mt-2.5 h-8 w-20 rounded-full shimmer-sand" />
@@ -324,10 +324,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                 )}
                 <div className="mt-3 h-1.5 w-full rounded-full bg-[#E8E0D5] dark:bg-[#352A24] overflow-hidden">
-                  <div
-                    className="h-full w-full origin-left rounded-full bg-[#C89216] dark:bg-[#E0A92E] transition-transform duration-300 ease-apple"
-                    style={{ transform: `scaleX(${Math.max(0.02, overallMastery / 100)})` }}
-                  />
+                  {overallMastery > 0 && (
+                    <div
+                      data-testid="metric-mastery-bar-fill"
+                      className="h-full rounded-full bg-[#C89216] dark:bg-[#E0A92E] transition-all duration-300 ease-apple"
+                      style={{ width: `${overallMastery}%` }}
+                    />
+                  )}
                 </div>
               </div>
 
@@ -347,7 +350,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                 )}
                 <p className="mt-2.5 text-[11px] text-[#61554D] dark:text-[#A99B8E] truncate">
-                  {totalPyqCount.toLocaleString()} cached PYQs ready
+                  {totalPyqCount.toLocaleString()} PYQs ready
                 </p>
               </div>
 
@@ -383,7 +386,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                 )}
                 <p className="mt-2.5 text-[11px] text-[#8B6209] dark:text-[#D9B664] truncate">
-                  Weighted across 11 subjects
+                  Weighted across 12 subjects
                 </p>
               </div>
             </div>
@@ -451,16 +454,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </span>
                 </div>
                 <div className="h-1.5 w-full rounded-full bg-[#E8E0D5] dark:bg-[#352A24] overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${
-                      isDone
-                        ? 'bg-[#2E5E3E] dark:bg-[#7BB88F]'
-                        : isActive
-                        ? 'bg-[#6E261A] dark:bg-[#E0A92E]'
-                        : 'bg-[#C89216]/35'
-                    }`}
-                    style={{ width: `${Math.max(isActive ? 6 : 0, p.progressPct)}%` }}
-                  />
+                  {p.progressPct > 0 && (
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${
+                        isDone
+                          ? 'bg-[#2E5E3E] dark:bg-[#7BB88F]'
+                          : isActive
+                          ? 'bg-[#6E261A] dark:bg-[#E0A92E]'
+                          : 'bg-[#C89216]/35'
+                      }`}
+                      style={{ width: `${p.progressPct}%` }}
+                    />
+                  )}
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-[#61554D] dark:text-[#A99B8E]">
                   <span>{p.subtitle}</span>
@@ -597,10 +602,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="font-display text-xl font-bold tracking-[-0.02em] text-[#1C1613] dark:text-[#F5F0E8]">
-              11-Subject Syllabus Radar
+              12-Subject Syllabus Radar
             </h2>
             <p className="text-sm text-[#61554D] dark:text-[#A99B8E]">
-              Click any subject card to inspect subtopics, confidence levels, and revision traps.
+              Click any subject card to inspect subtopics and revision status.
             </p>
           </div>
           <button
@@ -642,17 +647,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
 
               <div className="space-y-2">
-                <div className="h-1.5 w-full rounded-full bg-[#EFE9DF] dark:bg-[#2C241F] overflow-hidden">
-                  <div
-                    className={`h-full w-full origin-left rounded-full transition-transform duration-300 ease-apple ${
-                      mastery >= 75
-                        ? 'bg-[#2E5E3E] dark:bg-[#7BB88F]'
-                        : mastery >= 40
-                        ? 'bg-[#C89216] dark:bg-[#E0A92E]'
-                        : 'bg-[#6E261A] dark:bg-[#B54A38]'
-                    }`}
-                    style={{ transform: `scaleX(${Math.max(0.03, mastery / 100)})` }}
-                  />
+                <div
+                  data-testid={`radar-progress-track-${subject.id}`}
+                  className="h-1.5 w-full rounded-full bg-[#EFE9DF] dark:bg-[#2C241F] overflow-hidden"
+                >
+                  {mastery > 0 && (
+                    <div
+                      data-testid={`radar-progress-fill-${subject.id}`}
+                      className={`h-full rounded-full transition-all duration-300 ease-apple ${
+                        mastery >= 75
+                          ? 'bg-[#2E5E3E] dark:bg-[#7BB88F]'
+                          : mastery >= 40
+                          ? 'bg-[#C89216] dark:bg-[#E0A92E]'
+                          : 'bg-[#6E261A] dark:bg-[#B54A38]'
+                      }`}
+                      style={{ width: `${mastery}%` }}
+                    />
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between text-[11px]">
@@ -760,11 +771,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 Daily PYQ Autopilot
               </h3>
               <p className="text-xs leading-relaxed text-[#61554D] dark:text-[#A99B8E]">
-                Cache-first Firestore bank with{' '}
+                Question bank with{' '}
                 <span className="font-mono font-semibold text-[#1C1613] dark:text-[#F5F0E8]">
                   {totalPyqCount.toLocaleString()} PYQs
                 </span>
-                . Fetches 1 fresh free-tier batch per IST calendar day.
+                . Syncs 1 fresh curated batch per IST calendar day.
               </p>
               {autopilotStatusMsg && (
                 <p className="text-[11px] font-mono text-[#6E261A] dark:text-[#E0A92E]">

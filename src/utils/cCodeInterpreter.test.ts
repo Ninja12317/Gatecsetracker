@@ -52,7 +52,7 @@ test('Local C interpreter guards infinite loops cleanly without hanging', () => 
 test('extractCodeFromPyq and convertFramesToTraceTable produce valid structured data', () => {
   const q: Question = {
     id: 'test_q',
-    subjectId: 'pds',
+    subjectId: 'cprog',
     subtopic: 'C Pointers',
     format: 'NAT',
     marks: 2,

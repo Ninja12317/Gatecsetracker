@@ -1,5 +1,5 @@
 /* GATE '27 — Lightweight Offline-Ready Service Worker (100% Free, Safe Auth Bypass) */
-const CACHE_NAME = 'gate27-pwa-v1';
+const CACHE_NAME = 'gate27-pwa-v2';
 const PRECACHE_ASSETS = [
   '/manifest.webmanifest',
   '/icon.svg',
@@ -56,7 +56,15 @@ function shouldBypass(url) {
   if (BYPASS_HOSTS.some((h) => url.hostname === h || url.hostname.endsWith('.' + h))) {
     return true;
   }
-  if (url.pathname.startsWith('/__/') || url.pathname.startsWith('/@vite')) {
+  if (
+    url.pathname.startsWith('/__/') ||
+    url.pathname.startsWith('/@vite') ||
+    url.pathname.startsWith('/@react-refresh') ||
+    url.pathname.startsWith('/@fs/') ||
+    url.pathname.startsWith('/@id/') ||
+    url.pathname.startsWith('/node_modules/') ||
+    url.pathname.startsWith('/src/')
+  ) {
     return true;
   }
   return false;

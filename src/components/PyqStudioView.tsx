@@ -12,6 +12,14 @@ import {
   FileDown,
   ChevronDown,
   SlidersHorizontal,
+  History,
+  KeyRound,
+  Sparkles,
+  CheckCircle2,
+  XCircle,
+  Trash2,
+  Play,
+  Target,
 } from 'lucide-react';
 import type {
   DailyTestRecord,
@@ -21,6 +29,7 @@ import type {
   PdfExportRequest,
   Question,
   SubjectId,
+  TestHistoryEntry,
   VerifiedAnswerRecord,
   WarRoomState,
 } from '../types';
@@ -33,10 +42,27 @@ import {
 import { computeGaStreakMetrics } from '../utils/gaStreak';
 import { getIstDateString } from '../utils/pyqServerHelpers';
 import { applyVerifiedAnswer } from '../utils/gaterNormalizer';
+import { hasGateOverflowUrl } from '../utils/subjectMigration';
+import {
+  evaluateQuestionStrict,
+  formatGradedScoreSummary,
+  hasVerifiedAnswerKey,
+  parseSerializedResponse,
+} from '../utils/testScoringEngine';
 import type { SubjectFetchResult, UrlIngestResult } from '../hooks/useWarRoomStore';
 import { PyqTestBuilder, type SessionMode } from './PyqTestBuilder';
 import { PyqCbtSession, type ActiveCbtSession, type UserResponse } from './PyqCbtSession';
 import { RichQuestionContent } from './RichQuestionContent';
+
+export interface ConceptDrillContext {
+  nonce: number;
+  cardTitle: string;
+  subjectId: SubjectId;
+  subtopic: string;
+  questions: Question[];
+  matchedCount: number;
+  usedSubjectFallback: boolean;
+}
 
 interface DailyCompletionPayload {
   dateIst?: string;
@@ -128,20 +154,23 @@ interface PyqStudioViewProps {
   zenMode: boolean;
   onToggleZenMode: () => void;
   onRequestPdfExport: (req: PdfExportRequest) => void;
+  onRecordTestHistory?: (entry: TestHistoryEntry) => void;
+  onDeleteTestHistory?: (testId: string) => void;
   onSessionStateChange?: (info: {
     active: boolean;
     isTimed: boolean;
     finished: boolean;
     title: string;
     sketchpadOpen: boolean;
-    studioTab: 'practice' | 'mistakes' | 'resources';
+    studioTab: 'practice' | 'history' | 'mistakes' | 'resources';
   }) => void;
   exitSessionTrigger?: number;
   resetStudioTabTrigger?: number;
-  vaultDrillRequest?: { nonce: number; title: string; questions: Question[] } | null;
+  conceptDrillContext?: ConceptDrillContext | null;
+  onClearConceptDrill?: () => void;
 }
 
-type StudioTab = 'practice' | 'mistakes' | 'resources';
+type StudioTab = 'practice' | 'history' | 'mistakes' | 'resources';
 
 const ERROR_TAGS: ErrorTag[] = [
   'Conceptual Gap',
@@ -197,15 +226,22 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
   zenMode,
   onToggleZenMode,
   onRequestPdfExport,
+  onRecordTestHistory,
+  onDeleteTestHistory,
   onSessionStateChange,
   exitSessionTrigger = 0,
   resetStudioTabTrigger = 0,
-  vaultDrillRequest = null,
+  conceptDrillContext = null,
+  onClearConceptDrill,
 }) => {
   const [studioTab, setStudioTab] = useState<StudioTab>('practice');
   const [session, setSession] = useState<ActiveCbtSession | null>(null);
   const [sketchpadOpen, setSketchpadOpen] = useState<boolean>(false);
   const [moreToolsOpen, setMoreToolsOpen] = useState<boolean>(false);
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+  const [historyKeyDrafts, setHistoryKeyDrafts] = useState<Record<string, string>>({});
+  const [historyVerifyingIds, setHistoryVerifyingIds] = useState<Record<string, boolean>>({});
+  const [historyKeySaved, setHistoryKeySaved] = useState<Record<string, boolean>>({});
 
   // Notify parent App about active PYQ test session / sketchpad / sub-tab for Mobile Bottom Nav & Contextual Back
   useEffect(() => {
@@ -480,13 +516,133 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
     }
   }, [openMistakesTrigger]);
 
-  // Launch targeted GateR PYQ drill straight from Formula & Trap Vault card
+  // Open Test Builder with Concept Drill banner when arriving from Formula & Trap Vault
   useEffect(() => {
-    if (vaultDrillRequest && vaultDrillRequest.nonce > 0 && vaultDrillRequest.questions.length > 0) {
-      startSession(vaultDrillRequest.title, vaultDrillRequest.questions, 'practice_sprint');
+    if (conceptDrillContext && conceptDrillContext.nonce > 0) {
+      setSession(null);
+      setStudioTab('practice');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vaultDrillRequest?.nonce]);
+  }, [conceptDrillContext?.nonce]);
+
+  const questionById = useMemo(
+    () => new Map(allQuestions.map((q) => [q.id, q])),
+    [allQuestions]
+  );
+
+  const handleOpenHistoryReview = useCallback(
+    (entry: TestHistoryEntry) => {
+      const questions = entry.questionIds
+        .map((id) => questionById.get(id))
+        .filter((q): q is Question => Boolean(q));
+      if (questions.length === 0) return;
+
+      const responses: Record<string, UserResponse> = {};
+      const checked: ActiveCbtSession['checked'] = {};
+      const visited: Record<string, boolean> = {};
+
+      for (const q of questions) {
+        visited[q.id] = true;
+        const resp = parseSerializedResponse(q.format, entry.responses[q.id]);
+        responses[q.id] = resp;
+        const ev = evaluateQuestionStrict(q, resp);
+        checked[q.id] = {
+          attempted: ev.attempted,
+          isCorrect: ev.isCorrect,
+          marksAwarded: ev.marksAwarded,
+          maxMarks: ev.maxMarks,
+        };
+      }
+
+      setStudioTab('practice');
+      setSession({
+        title: entry.title,
+        mode: entry.mode === 'practice' || entry.mode === 'concept_drill' ? 'practice_sprint' : 'cbt_mock',
+        questions,
+        secondsRemaining: 0,
+        elapsedSeconds: entry.durationSeconds ?? 0,
+        questionSeconds: {},
+        currentIndex: 0,
+        responses,
+        checked,
+        markedForReview: {},
+        visited,
+        finished: true,
+      });
+    },
+    [questionById]
+  );
+
+  const handleSaveHistoryKey = useCallback(
+    async (q: Question) => {
+      const raw = (historyKeyDrafts[q.id] ?? '').trim();
+      if (!raw) return;
+
+      let record: Omit<VerifiedAnswerRecord, 'updatedAt'> | null = null;
+      if (q.format === 'MCQ') {
+        const clean = raw.toUpperCase().replace(/[^A-E]/g, '').slice(0, 1);
+        if (!clean) return;
+        record = {
+          questionId: q.id,
+          format: 'MCQ',
+          correctOption: clean,
+          explanation: q.explanation || 'Official answer key saved by user.',
+          wrongOptionAnalysis: q.wrongOptionAnalysis || '',
+          source: 'manual',
+        };
+      } else if (q.format === 'MSQ') {
+        const cleanList = Array.from(
+          new Set(
+            raw
+              .toUpperCase()
+              .split(/[\s,;]+/)
+              .map((x) => x.replace(/[^A-E]/g, '').slice(0, 1))
+              .filter((x) => /^[A-E]$/.test(x))
+          )
+        ).sort();
+        if (cleanList.length === 0) return;
+        record = {
+          questionId: q.id,
+          format: 'MSQ',
+          correctOptions: cleanList,
+          explanation: q.explanation || 'Official MSQ answer key saved by user.',
+          wrongOptionAnalysis: q.wrongOptionAnalysis || '',
+          source: 'manual',
+        };
+      } else {
+        const num = Number(raw);
+        if (!Number.isFinite(num)) return;
+        record = {
+          questionId: q.id,
+          format: 'NAT',
+          natAnswer: num,
+          natTolerance: 0.01,
+          explanation: q.explanation || 'Official NAT answer key saved by user.',
+          wrongOptionAnalysis: q.wrongOptionAnalysis || '',
+          source: 'manual',
+        };
+      }
+
+      await onSaveVerifiedAnswer(record);
+      setHistoryKeySaved((prev) => ({ ...prev, [q.id]: true }));
+      onNotify?.('Official answer key saved — test scores & analytics updated.');
+    },
+    [historyKeyDrafts, onSaveVerifiedAnswer, onNotify]
+  );
+
+  const handleAiVerifyHistoryQuestion = useCallback(
+    async (q: Question) => {
+      if (historyVerifyingIds[q.id]) return;
+      setHistoryVerifyingIds((prev) => ({ ...prev, [q.id]: true }));
+      const res = await onVerifySinglePyq(q);
+      setHistoryVerifyingIds((prev) => ({ ...prev, [q.id]: false }));
+      if (res.ok) {
+        onNotify?.('Verified with AI — test scores & analytics updated.');
+      } else {
+        onNotify?.(res.message);
+      }
+    },
+    [historyVerifyingIds, onVerifySinglePyq, onNotify]
+  );
 
   const mistakeEntries = useMemo(() => {
     const qMap = new Map(allQuestions.map((q) => [q.id, q]));
@@ -566,6 +722,7 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
         onCompleteGaSprint={onCompleteGaSprint}
         onCompleteDailyDpp={onCompleteDailyDpp}
         onCompleteDailyGa={onCompleteDailyGa}
+        onRecordTestHistory={onRecordTestHistory}
         onSaveVerifiedAnswer={onSaveVerifiedAnswer}
         onVerifySinglePyq={onVerifySinglePyq}
         onToggleCalculator={onToggleCalculator}
@@ -576,7 +733,7 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
     );
   }
 
-  // ===================== STUDIO LOBBY / MISTAKE BUCKET / OPEN RESOURCES =====================
+  // ===================== STUDIO LOBBY / TEST HISTORY / MISTAKE BUCKET / OPEN RESOURCES =====================
   return (
     <div className="space-y-6">
       {/* Studio Sub-Navigation Pill Bar (Single-row horizontal rail on mobile, zero vertical stacking) */}
@@ -591,6 +748,10 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
               {
                 id: 'practice' as const,
                 label: `Test Builder (${allQuestions.length.toLocaleString()})`,
+              },
+              {
+                id: 'history' as const,
+                label: `History (${state.testHistory.length})`,
               },
               {
                 id: 'mistakes' as const,
@@ -700,27 +861,354 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
         )}
       </div>
 
-      {/* TAB 1: FLEXIBLE GATER CBT TEST BUILDER */}
+      {/* TAB 1: FLEXIBLE GATER CBT TEST BUILDER (+ CONCEPT DRILL BANNER) */}
       {studioTab === 'practice' && (
-        <PyqTestBuilder
-          state={state}
-          allQuestions={allQuestions}
-          gaterSyncStatus={gaterSyncStatus}
-          gaterCount={gaterCount}
-          arshanCount={arshanCount}
-          enrichedCount={enrichedCount}
-          verifiedBankCount={verifiedBankCount}
-          syncProgressMsg={syncProgressMsg}
-          gaterSyncedAt={gaterSyncedAt}
-          gaterError={gaterError}
-          onResyncGateR={onResyncGateR}
-          onStartSession={startSession}
-          onStartDailyDpp={handleLaunchDailyDpp}
-          gaStreakMetrics={gaStreakMetrics}
-          onStartGaSprint={handleLaunchGaSprint}
-          onRequestPdfExport={onRequestPdfExport}
-          onNotify={onNotify}
-        />
+        <div className="space-y-4">
+          {conceptDrillContext && conceptDrillContext.questions.length > 0 && (
+            <div
+              data-testid="concept-drill-banner"
+              className="rounded-[24px] squircle border-2 border-[#C89216] dark:border-[#E0A92E] bg-[#FDF6E3] dark:bg-[#2C2215] p-4 sm:p-5 shadow-warm space-y-3"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-1 min-w-0">
+                  <div className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#8B6209] dark:text-[#E0A92E]">
+                    <Target className="h-3.5 w-3.5" />
+                    <span>
+                      {conceptDrillContext.usedSubjectFallback
+                        ? `Showing ${SUBJECT_MAP[conceptDrillContext.subjectId]?.name ?? conceptDrillContext.subjectId.toUpperCase()} PYQs`
+                        : 'Weighted Concept Drill Ready'}
+                    </span>
+                  </div>
+                  <h2 className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8]">
+                    Concept Drill: {conceptDrillContext.cardTitle} ·{' '}
+                    {conceptDrillContext.usedSubjectFallback
+                      ? `Showing ${SUBJECT_MAP[conceptDrillContext.subjectId]?.code ?? ''} PYQs (${conceptDrillContext.questions.length})`
+                      : `${conceptDrillContext.matchedCount} Matching PYQ${conceptDrillContext.matchedCount === 1 ? '' : 's'} Found`}
+                  </h2>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    data-testid="start-concept-drill-btn"
+                    onClick={() =>
+                      startSession(
+                        `Concept Drill · ${conceptDrillContext.cardTitle}`,
+                        conceptDrillContext.questions,
+                        'practice_sprint'
+                      )
+                    }
+                    className="inline-flex items-center gap-1.5 h-9 px-4 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#E0A92E] dark:text-[#1C1613] text-[#FAF8F4] text-xs font-bold press-tactile"
+                  >
+                    <Play className="h-3.5 w-3.5" />
+                    Start Concept Drill ({conceptDrillContext.questions.length} Qs)
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="clear-concept-drill-btn"
+                    onClick={() => onClearConceptDrill?.()}
+                    className="inline-flex items-center gap-1 h-9 px-3.5 rounded-full border border-[#E8E0D5] dark:border-[#5C441B] bg-[#FFFFFF] dark:bg-[#1C1714] text-xs font-semibold text-[#61554D] dark:text-[#D8CBB8] hover:text-[#1C1613] press-tactile"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {conceptDrillContext.questions.slice(0, 4).map((q) => (
+                  <span
+                    key={q.id}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FFFFFF]/90 dark:bg-[#1C1714] border border-[#EED89A] dark:border-[#5C441B] text-[11px] text-[#61554D] dark:text-[#D8CBB8]"
+                  >
+                    <span className="font-mono font-bold text-[#6E261A] dark:text-[#E0A92E]">
+                      {q.paperTag || SUBJECT_MAP[q.subjectId]?.code}
+                    </span>
+                    <span className="truncate max-w-[200px]">{q.subtopic}</span>
+                    <span className="font-mono text-[10px] opacity-75">{q.marks}M</span>
+                  </span>
+                ))}
+                {conceptDrillContext.questions.length > 4 && (
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-mono font-semibold text-[#8B6209] dark:text-[#E0A92E]">
+                    +{conceptDrillContext.questions.length - 4} more
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          <PyqTestBuilder
+            state={state}
+            allQuestions={allQuestions}
+            gaterSyncStatus={gaterSyncStatus}
+            gaterCount={gaterCount}
+            arshanCount={arshanCount}
+            enrichedCount={enrichedCount}
+            verifiedBankCount={verifiedBankCount}
+            syncProgressMsg={syncProgressMsg}
+            gaterSyncedAt={gaterSyncedAt}
+            gaterError={gaterError}
+            onResyncGateR={onResyncGateR}
+            onStartSession={startSession}
+            onStartDailyDpp={handleLaunchDailyDpp}
+            gaStreakMetrics={gaStreakMetrics}
+            onStartGaSprint={handleLaunchGaSprint}
+            onRequestPdfExport={onRequestPdfExport}
+            onNotify={onNotify}
+          />
+        </div>
+      )}
+
+      {/* TAB 2: TEST HISTORY & INLINE KEY RECALCULATION */}
+      {studioTab === 'history' && (
+        <section className="space-y-4" data-testid="pyq-test-history-panel">
+          {state.testHistory.length === 0 ? (
+            <div className="rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-12 text-center shadow-warm space-y-2">
+              <History className="h-7 w-7 mx-auto text-[#C89216] dark:text-[#E0A92E]" />
+              <p className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8]">
+                No completed PYQ tests yet.
+              </p>
+              <p className="text-xs text-[#61554D] dark:text-[#A99B8E] max-w-md mx-auto">
+                Finish any Practice Sprint, Timed CBT Mock, Daily DPP, or Daily GA session to save it here. You can enter or edit official answer keys anytime and scores recalculate instantly.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3.5">
+              {state.testHistory.map((entry) => {
+                const isExpanded = expandedHistoryId === entry.id;
+                const scoreSummary = formatGradedScoreSummary(entry);
+                const dateLabel = (() => {
+                  const d = new Date(entry.completedAt);
+                  return Number.isNaN(d.getTime())
+                    ? entry.completedAt.slice(0, 10)
+                    : d.toLocaleString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      });
+                })();
+
+                return (
+                  <article
+                    key={entry.id}
+                    data-testid={`test-history-card-${entry.id}`}
+                    className="rounded-[24px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-4 sm:p-5 shadow-warm space-y-3.5"
+                  >
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#61554D] dark:text-[#A99B8E]">
+                          <span className="font-mono px-2.5 py-0.5 rounded-full bg-[#F4EFE6] dark:bg-[#241D19] font-semibold text-[#6E261A] dark:text-[#E0A92E]">
+                            {entry.mode === 'daily_dpp'
+                              ? 'Daily DPP'
+                              : entry.mode === 'daily_ga'
+                              ? 'Daily GA'
+                              : entry.mode === 'timed'
+                              ? 'CBT Mock'
+                              : entry.mode === 'concept_drill'
+                              ? 'Concept Drill'
+                              : 'Practice Sprint'}
+                          </span>
+                          <span className="font-mono">{dateLabel}</span>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-mono">{entry.questionIds.length} Qs</span>
+                          {entry.pendingKeyCount > 0 && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-[#EED89A] dark:border-[#5C441B] bg-[#FDF6E3] dark:bg-[#2C2215] text-[#8B6209] dark:text-[#E0A92E] font-bold">
+                              <KeyRound className="h-3 w-3" />
+                              {entry.pendingKeyCount} Pending Key
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="font-display text-sm sm:text-base font-bold text-[#1C1613] dark:text-[#F5F0E8] truncate">
+                          {entry.title}
+                        </h3>
+                        <div className="flex flex-wrap items-center gap-3 font-mono text-xs tabular-nums">
+                          <span
+                            data-testid={`history-score-${entry.id}`}
+                            className="font-bold text-[#6E261A] dark:text-[#E0A92E]"
+                          >
+                            {scoreSummary}
+                          </span>
+                          <span className="text-[#2E5E3E] dark:text-[#7BB88F] font-semibold">
+                            Acc: {entry.gradedAttemptedCount > 0 ? `${entry.accuracyPct}%` : '—'}
+                          </span>
+                          {entry.penaltyMarks > 0 && (
+                            <span className="text-[#B83227] dark:text-[#F08A80]">
+                              Penalty: −{entry.penaltyMarks.toFixed(2)}M
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedHistoryId((curr) => (curr === entry.id ? null : entry.id))
+                          }
+                          data-testid={`toggle-history-keys-${entry.id}`}
+                          className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FAF8F4] dark:bg-[#241D19] text-xs font-semibold text-[#1C1613] dark:text-[#F5F0E8] hover:border-[#C89216] press-tactile"
+                        >
+                          <KeyRound className="h-3.5 w-3.5 text-[#6E261A] dark:text-[#E0A92E]" />
+                          {isExpanded ? 'Hide Questions' : 'Inspect & Edit Keys'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenHistoryReview(entry)}
+                          className="inline-flex items-center gap-1 h-8 px-3.5 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] text-white text-xs font-semibold press-tactile"
+                        >
+                          Full Review
+                        </button>
+                        {onDeleteTestHistory && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteTestHistory(entry.id)}
+                            aria-label={`Delete test history entry ${entry.title}`}
+                            className="p-2 rounded-full text-[#8C7E75] hover:text-[#B83227] hover:bg-[#FBEAE8] dark:hover:bg-[#3A1E1B]"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="pt-3 border-t border-[#E8E0D5] dark:border-[#2E2520] space-y-2.5">
+                        {entry.questionIds.map((qid, qIdx) => {
+                          const q = questionById.get(qid);
+                          if (!q) return null;
+                          const savedAns = entry.responses[qid] ?? '';
+                          const respObj = parseSerializedResponse(q.format, savedAns);
+                          const ev = evaluateQuestionStrict(q, respObj);
+                          const hasKey = hasVerifiedAnswerKey(q);
+                          const isVerifying = Boolean(historyVerifyingIds[q.id]);
+                          const keyDisplay =
+                            q.format === 'MCQ'
+                              ? q.correctOption ?? ''
+                              : q.format === 'MSQ'
+                              ? q.correctOptions?.join(', ') ?? ''
+                              : q.natAnswer !== undefined
+                              ? String(q.natAnswer)
+                              : '';
+
+                          return (
+                            <div
+                              key={qid}
+                              className="rounded-[18px] border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] p-3.5 space-y-2.5"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-mono font-bold text-[#1C1613] dark:text-[#F5F0E8]">
+                                    Q{qIdx + 1}
+                                  </span>
+                                  <span className="font-mono px-2 py-0.5 rounded-full bg-[#FFFFFF] dark:bg-[#1C1714] border border-[#E8E0D5] dark:border-[#352A24] text-[#6E261A] dark:text-[#E0A92E] font-semibold">
+                                    {SUBJECT_MAP[q.subjectId]?.code ?? q.subjectId.toUpperCase()} · {q.format} · {q.marks}M
+                                  </span>
+                                  <span className="text-[#61554D] dark:text-[#D8CBB8] truncate max-w-[220px]">
+                                    {q.subtopic}
+                                  </span>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+                                  <span className="text-[#61554D] dark:text-[#A99B8E]">
+                                    Yours: <strong className="text-[#1C1613] dark:text-[#F5F0E8]">{savedAns || 'Skipped'}</strong>
+                                  </span>
+                                  {ev.status === 'pending_key' ? (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-[#EED89A] dark:border-[#5C441B] bg-[#FDF6E3] dark:bg-[#2C2215] text-[#8B6209] dark:text-[#E0A92E] font-bold">
+                                      Pending Answer Key
+                                    </span>
+                                  ) : ev.status === 'correct' ? (
+                                    <span className="inline-flex items-center gap-1 text-[#2E5E3E] dark:text-[#7BB88F] font-bold">
+                                      <CheckCircle2 className="h-3.5 w-3.5" />+{ev.marksAwarded}M
+                                    </span>
+                                  ) : ev.status === 'wrong' ? (
+                                    <span className="inline-flex items-center gap-1 text-[#B83227] dark:text-[#F08A80] font-bold">
+                                      <XCircle className="h-3.5 w-3.5" />
+                                      {ev.marksAwarded}M
+                                    </span>
+                                  ) : (
+                                    <span className="text-[#8C7E75]">Unattempted</span>
+                                  )}
+                                  {hasKey && (
+                                    <span className="px-2 py-0.5 rounded-full bg-[#FFFFFF] dark:bg-[#1C1714] border border-[#E8E0D5] dark:border-[#352A24] text-[#1C1613] dark:text-[#F5F0E8] font-bold">
+                                      Key: {keyDisplay}
+                                    </span>
+                                  )}
+                                  {hasGateOverflowUrl(q) && (
+                                    <a
+                                      href={q.sourceUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 text-[#6E261A] dark:text-[#E0A92E] font-semibold hover:underline"
+                                    >
+                                      GateOverflow ↗
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Inline Official Key Input + Verify with AI */}
+                              <div className="flex flex-wrap items-center gap-2 pt-1.5 border-t border-[#E8E0D5]/70 dark:border-[#352A24]">
+                                <input
+                                  type="text"
+                                  aria-label={`Official answer key for Q${qIdx + 1}`}
+                                  data-testid={`history-key-input-${q.id}`}
+                                  value={historyKeyDrafts[q.id] ?? keyDisplay}
+                                  onChange={(e) =>
+                                    setHistoryKeyDrafts((prev) => ({
+                                      ...prev,
+                                      [q.id]: e.target.value,
+                                    }))
+                                  }
+                                  placeholder={
+                                    q.format === 'MCQ'
+                                      ? 'Key (e.g. B)'
+                                      : q.format === 'MSQ'
+                                      ? 'Keys (e.g. A, C)'
+                                      : 'NAT value (e.g. 42.5)'
+                                  }
+                                  className="h-8 w-36 px-3 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FFFFFF] dark:bg-[#130F0D] font-mono text-xs text-[#1C1613] dark:text-[#F5F0E8]"
+                                />
+                                <button
+                                  type="button"
+                                  data-testid={`history-save-key-btn-${q.id}`}
+                                  onClick={() => void handleSaveHistoryKey(q)}
+                                  className="h-8 px-3 rounded-full border border-[#C89216] bg-[#FDF6E3] dark:bg-[#2C2215] text-xs font-semibold text-[#8B6209] dark:text-[#E0A92E] press-tactile"
+                                >
+                                  {hasKey ? 'Update Key' : 'Save Official Key'}
+                                </button>
+                                {!hasKey && (
+                                  <button
+                                    type="button"
+                                    disabled={isVerifying}
+                                    onClick={() => void handleAiVerifyHistoryQuestion(q)}
+                                    className="inline-flex items-center gap-1 h-8 px-3 rounded-full bg-[#241914] dark:bg-[#E0A92E] text-[#FAF5EB] dark:text-[#1C1613] text-xs font-semibold disabled:opacity-50 press-tactile"
+                                  >
+                                    {isVerifying ? (
+                                      <RefreshCw className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Sparkles className="h-3 w-3" />
+                                    )}
+                                    {isVerifying ? 'Verifying...' : 'Verify with AI'}
+                                  </button>
+                                )}
+                                {historyKeySaved[q.id] && (
+                                  <span className="text-[11px] font-semibold text-[#2E5E3E] dark:text-[#7BB88F]">
+                                    Recalculated!
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
       )}
 
       {/* TAB 2: MISTAKE BUCKET */}
@@ -835,7 +1323,7 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
-                          {question.sourceUrl && (
+                          {hasGateOverflowUrl(question) && (
                             <a
                               href={question.sourceUrl}
                               target="_blank"
@@ -998,7 +1486,7 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
               )}
             </div>
 
-            {/* Per-Subject Free-Tier Fetcher */}
+            {/* Per-Subject PYQ Fetcher */}
             <div
               data-testid="subject-pyq-fetcher"
               className="rounded-[28px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] p-5 shadow-warm space-y-3"
@@ -1006,10 +1494,10 @@ export const PyqStudioView: React.FC<PyqStudioViewProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-xs font-bold text-[#1C1613] dark:text-[#F5F0E8]">
-                    Fetch More Subject PYQs (Free-Tier Grounded)
+                    Fetch More Subject PYQs
                   </h3>
                   <p className="text-[11px] text-[#61554D] dark:text-[#A99B8E] mt-0.5">
-                    Cache-first · Pulls 5 unseen GATE 2024–2026 PYQs with strict deduplication &amp; 45s cooldown.
+                    Pulls 5 unseen GATE 2024–2026 PYQs with automatic deduplication.
                   </p>
                 </div>
                 {quotaNotice && (

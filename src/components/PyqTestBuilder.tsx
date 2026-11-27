@@ -353,7 +353,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
               className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-[#EED89A] dark:border-[#5C441B] bg-[#FDF6E3] dark:bg-[#2C2215] text-xs font-semibold text-[#8B6209] dark:text-[#E0A92E]"
             >
               <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-              Syncing GateR + Arshan GitHub Banks into IndexedDB...
+              Syncing Question Bank...
             </span>
           ) : gaterSyncStatus === 'synced' ? (
             <span
@@ -361,8 +361,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
               className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-[#B8D7C3] dark:border-[#264D34] bg-[#EBF5EE] dark:bg-[#152B1D] text-xs font-semibold text-[#2E5E3E] dark:text-[#7BB88F]"
             >
               <span className="h-2 w-2 rounded-full bg-[#2E5E3E] dark:bg-[#7BB88F] shrink-0" />
-              Bank Synced · {totalBankCount.toLocaleString()} Qs (GateR + Arshan ·{' '}
-              {totalVerifiedCount.toLocaleString()} With Verified Answers)
+              Question Bank · {totalBankCount.toLocaleString()} Ready ({totalVerifiedCount.toLocaleString()} Verified Keys)
             </span>
           ) : (
             <span
@@ -370,7 +369,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
               className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-[#EED89A] dark:border-[#5C441B] bg-[#FDF6E3] dark:bg-[#2C2215] text-xs font-semibold text-[#8B6209] dark:text-[#E0A92E]"
             >
               <AlertCircle className="h-3.5 w-3.5" />
-              Local Cache · {totalBankCount.toLocaleString()} Qs Ready ({totalVerifiedCount} Verified)
+              Question Bank · {totalBankCount.toLocaleString()} Ready ({totalVerifiedCount.toLocaleString()} Verified Keys)
             </span>
           )}
 
@@ -378,7 +377,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
             {gaterCount > 0 ? `${gaterCount.toLocaleString()} GateR` : 'Curated'}
             {arshanCount > 0 ? ` · ${arshanCount} Arshan` : ''}
             {enrichedCount > 0 ? ` (${enrichedCount} Enriched Keys)` : ''}
-            {gaterSyncedAt ? ' · Cached Offline' : ''}
+            {gaterSyncedAt ? ' · Ready Offline' : ''}
           </span>
         </div>
 
@@ -393,7 +392,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
             <RefreshCw
               className={`h-3.5 w-3.5 ${gaterSyncStatus === 'syncing' ? 'animate-spin' : ''}`}
             />
-            <span>Sync All Repos</span>
+            <span>Refresh Bank</span>
           </button>
 
           <button
@@ -545,7 +544,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
               <span className="font-normal text-[#61554D] dark:text-[#A99B8E]">
                 (
                 {selectedSubjects.length === 0
-                  ? 'All 11 Selected'
+                  ? 'All 12 Selected'
                   : `${selectedSubjects.length} Selected`}
                 )
               </span>
@@ -556,7 +555,7 @@ export const PyqTestBuilder: React.FC<PyqTestBuilderProps> = ({
                 onClick={() => setSelectedSubjects([])}
                 className="text-[11px] font-semibold text-[#6E261A] dark:text-[#E0A92E] hover:underline"
               >
-                Select All 11
+                Select All 12
               </button>
             )}
           </div>

@@ -141,7 +141,7 @@ test('buildSubjectHoursVsWeightage and buildLast14DaysChartData compute ROI shar
     { id: 'x2', date: '2026-11-24', subjectId: 'em', minutes: 240, mode: 'pomodoro', completedAt: '2026-11-24T12:00:00' },
   ];
   const subjectRows = buildSubjectHoursVsWeightage(logs);
-  assert.equal(subjectRows.length, 11);
+  assert.equal(subjectRows.length, 12);
   const osRow = subjectRows.find((r) => r.subjectId === 'os');
   assert.ok(osRow);
   assert.equal(osRow.loggedHours, 2);

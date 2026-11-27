@@ -15,10 +15,10 @@ import { buildVaultCheatSheetPdf } from './pdfExporter.ts';
 import type { MistakeEntry, Question } from '../types/index.ts';
 
 describe('GATE 2027 Offline Master Vault Bundle', () => {
-  it('contains at least 132 cards with >= 12 cards per all 11 official GATE CSE subjects', () => {
+  it('contains at least 144 cards with >= 12 cards per all 12 official GATE CSE subjects', () => {
     assert.ok(
-      GATE_2027_MASTER_VAULT.length >= 132,
-      `Expected >= 132 master cards, got ${GATE_2027_MASTER_VAULT.length}`
+      GATE_2027_MASTER_VAULT.length >= 144,
+      `Expected >= 144 master cards, got ${GATE_2027_MASTER_VAULT.length}`
     );
 
     const counts: Record<string, number> = {};

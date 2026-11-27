@@ -8,6 +8,7 @@ import type {
   StudyLogEntry,
   WarRoomState,
 } from '../types';
+import { normalizeSubject12 } from './subjectMigration';
 
 export interface CountdownBreakdown {
   days: number;
@@ -242,23 +243,11 @@ export function computeEstimatedGateMarks(
   attempts: Record<string, QuestionAttemptRecord>
 ): number {
   const { accuracyPct, attemptedCount } = computePyqAccuracy(attempts);
-  const accuracyFactor = attemptedCount > 0 ? 0.55 + (accuracyPct / 100) * 0.45 : 0.72;
+  const accuracyFactor = attemptedCount > 0 ? 0.55 + (accuracyPct / 100) * 0.45 : 0.78;
   let weightedSum = 0;
   for (const subject of subjects) {
     const masteryPct = computeSubjectMastery(subject, progress);
-    // Confidence modifier per subject
-    let confTotal = 0;
-    let confCount = 0;
-    for (const sub of subject.subtopics) {
-      const p = progress[sub.id];
-      if (p && p.status !== 'not_started') {
-        confTotal += p.confidence;
-        confCount += 1;
-      }
-    }
-    const avgConf = confCount > 0 ? confTotal / confCount : 3;
-    const confMultiplier = 0.75 + (avgConf / 5) * 0.25;
-    weightedSum += subject.weightage * (masteryPct / 100) * confMultiplier;
+    weightedSum += subject.weightage * (masteryPct / 100);
   }
   const projected = Math.min(100, Math.max(0, weightedSum * accuracyFactor));
   return Number(projected.toFixed(1));
@@ -437,7 +426,7 @@ export function formatCalcResult(num: number): string {
 }
 
 const VALID_SUBJECT_IDS = new Set<string>([
-  'ga', 'em', 'dl', 'coa', 'pds', 'algo', 'toc', 'cd', 'os', 'dbms', 'cn',
+  'ga', 'em', 'dl', 'coa', 'cprog', 'ds', 'pds', 'algo', 'toc', 'cd', 'os', 'dbms', 'cn',
 ]);
 
 export function validateImportedQuestionsJson(rawJson: string): {
@@ -475,7 +464,7 @@ export function validateImportedQuestionsJson(rawJson: string): {
     }
     const obj = item as Record<string, unknown>;
     if (typeof obj.subjectId !== 'string' || !VALID_SUBJECT_IDS.has(obj.subjectId)) {
-      errors.push(`${prefix}: invalid or missing subjectId (must be one of ga, em, dl, coa, pds, algo, toc, cd, os, dbms, cn).`);
+      errors.push(`${prefix}: invalid or missing subjectId (must be one of ga, em, dl, coa, cprog, ds, algo, toc, cd, os, dbms, cn).`);
       return;
     }
     if (typeof obj.prompt !== 'string' || obj.prompt.trim().length < 5) {
@@ -526,7 +515,10 @@ export function validateImportedQuestionsJson(rawJson: string): {
         typeof obj.id === 'string' && obj.id.trim().length > 0
           ? obj.id.trim()
           : `custom-${Date.now()}-${index}`,
-      subjectId: obj.subjectId as SubjectId,
+      subjectId: normalizeSubject12(obj.subjectId, {
+        subtopic: typeof obj.subtopic === 'string' ? obj.subtopic : '',
+        text: `${typeof obj.prompt === 'string' ? obj.prompt : ''} ${typeof obj.codeSnippet === 'string' ? obj.codeSnippet : ''}`,
+      }),
       subtopic: typeof obj.subtopic === 'string' && obj.subtopic.trim() ? obj.subtopic.trim() : 'General',
       format: obj.format,
       marks,

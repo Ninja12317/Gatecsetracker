@@ -20,18 +20,26 @@ import {
   FileDown,
   Clock,
   LayoutGrid,
+  Pencil,
 } from 'lucide-react';
 import type {
   DryRunTraceTable,
   ErrorTag,
   PdfExportRequest,
   Question,
+  TestHistoryEntry,
   VerifiedAnswerRecord,
   WarRoomState,
 } from '../types';
 import { SUBJECT_MAP } from '../data/syllabus';
 import { evaluateQuestionResponse, type EvaluationResult } from '../utils/gateMath';
 import { applyVerifiedAnswer } from '../utils/gaterNormalizer';
+import { hasGateOverflowUrl } from '../utils/subjectMigration';
+import {
+  formatGradedScoreSummary,
+  gradeTestSessionStrict,
+  hasVerifiedAnswerKey,
+} from '../utils/testScoringEngine';
 import {
   computeSprintPaceAnalytics,
   formatPaceDuration,
@@ -72,6 +80,8 @@ interface DailyCompletionPayload {
   questionIds: string[];
   score: number;
   maxMarks: number;
+  gradedMaxMarks?: number;
+  pendingKeyCount?: number;
   accuracy: number;
   attemptedCount: number;
   correctCount: number;
@@ -109,6 +119,7 @@ interface PyqCbtSessionProps {
   }) => void;
   onCompleteDailyDpp?: (payload: DailyCompletionPayload) => void;
   onCompleteDailyGa?: (payload: DailyCompletionPayload) => void;
+  onRecordTestHistory?: (entry: TestHistoryEntry) => void;
   onSaveVerifiedAnswer: (
     record: Omit<VerifiedAnswerRecord, 'updatedAt'>
   ) => Promise<VerifiedAnswerRecord>;
@@ -157,10 +168,7 @@ function hasAnswerResponse(resp?: UserResponse): boolean {
 }
 
 function questionHasKey(q: Question): boolean {
-  if (q.hasAnswerKey === true) return true;
-  if (q.format === 'MCQ') return Boolean(q.correctOption);
-  if (q.format === 'MSQ') return Boolean(q.correctOptions && q.correctOptions.length > 0);
-  return typeof q.natAnswer === 'number' && Number.isFinite(q.natAnswer);
+  return hasVerifiedAnswerKey(q);
 }
 
 export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
@@ -180,6 +188,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
   onCompleteGaSprint,
   onCompleteDailyDpp,
   onCompleteDailyGa,
+  onRecordTestHistory,
   onSaveVerifiedAnswer,
   onVerifySinglePyq,
   onToggleCalculator,
@@ -191,6 +200,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
   const [verifyFeedback, setVerifyFeedback] = useState<Record<string, { ok: boolean; msg: string }>>({});
   const [manualKeyDrafts, setManualKeyDrafts] = useState<Record<string, string>>({});
   const [manualKeySaved, setManualKeySaved] = useState<Record<string, boolean>>({});
+  const [editingKeyIds, setEditingKeyIds] = useState<Record<string, boolean>>({});
   const [mobilePaletteOpen, setMobilePaletteOpen] = useState(false);
   const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
 
@@ -460,7 +470,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
           questionId: q.id,
           format: 'MCQ',
           correctOption: clean,
-          explanation: q.explanation || 'Official answer key saved by user from GateOverflow.',
+          explanation: q.explanation || 'Official answer key saved by user.',
           wrongOptionAnalysis: q.wrongOptionAnalysis || '',
           source: 'manual',
         };
@@ -479,7 +489,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
           questionId: q.id,
           format: 'MSQ',
           correctOptions: cleanList,
-          explanation: q.explanation || 'Official MSQ answer key saved by user from GateOverflow.',
+          explanation: q.explanation || 'Official MSQ answer key saved by user.',
           wrongOptionAnalysis: q.wrongOptionAnalysis || '',
           source: 'manual',
         };
@@ -491,7 +501,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
           format: 'NAT',
           natAnswer: num,
           natTolerance: 0.01,
-          explanation: q.explanation || 'Official NAT answer key saved by user from GateOverflow.',
+          explanation: q.explanation || 'Official NAT answer key saved by user.',
           wrongOptionAnalysis: q.wrongOptionAnalysis || '',
           source: 'manual',
         };
@@ -499,6 +509,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
 
       const saved = await onSaveVerifiedAnswer(record);
       setManualKeySaved((prev) => ({ ...prev, [q.id]: true }));
+      setEditingKeyIds((prev) => ({ ...prev, [q.id]: false }));
 
       // Re-evaluate user's response automatically with the newly saved key
       const updatedQ = applyVerifiedAnswer(q, saved);
@@ -569,64 +580,94 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
   );
 
   const handleFinishSession = useCallback(() => {
-    const nextChecked = { ...session.checked };
-    let correctCount = 0;
-    let gradedAttempted = 0;
-    let marksAwarded = 0;
-    let maxMarks = 0;
-
-    const responsesMap: Record<string, string> = {};
-    let attemptedTotal = 0;
-
+    const selfCheckOverrides: Record<string, 'correct' | 'wrong'> = {};
     for (const q of liveQuestions) {
-      maxMarks += q.marks;
-      const resp = session.responses[q.id] ?? {};
-      const selText = formatSelectedAnswer(resp);
-      if (selText) {
-        responsesMap[q.id] = selText;
-      }
-      if (questionHasKey(q)) {
-        const res = evaluateQuestionResponse(q, resp);
-        nextChecked[q.id] = res;
-        if (res.attempted) {
-          attemptedTotal += 1;
-          gradedAttempted += 1;
-          if (res.isCorrect) correctCount += 1;
-          marksAwarded += res.marksAwarded;
-          onRecordAttempt(q.id, res.isCorrect, res.marksAwarded, res.maxMarks, selText);
-        }
-      } else if (!nextChecked[q.id]) {
-        const hasAns = hasAnswerResponse(resp);
-        if (hasAns) attemptedTotal += 1;
-        nextChecked[q.id] = {
-          attempted: hasAns,
-          isCorrect: false,
-          marksAwarded: 0,
-          maxMarks: q.marks,
-          selfChecked: false,
-        };
-      } else if (nextChecked[q.id].attempted) {
-        attemptedTotal += 1;
-        gradedAttempted += 1;
-        if (nextChecked[q.id].isCorrect) correctCount += 1;
-        marksAwarded += nextChecked[q.id].marksAwarded;
+      const prevCheck = session.checked[q.id];
+      if (prevCheck?.selfChecked && prevCheck.attempted) {
+        selfCheckOverrides[q.id] = prevCheck.isCorrect ? 'correct' : 'wrong';
       }
     }
 
-    const roundedMarks = Math.round(marksAwarded * 100) / 100;
-    const denom = gradedAttempted > 0 ? gradedAttempted : liveQuestions.length;
-    const accuracyPct = denom > 0 ? Math.round((correctCount / denom) * 100) : 0;
+    const strictGrade = gradeTestSessionStrict(
+      liveQuestions,
+      session.responses,
+      selfCheckOverrides
+    );
+
+    const nextChecked: ActiveCbtSession['checked'] = { ...session.checked };
+    const responsesMap: Record<string, string> = {};
+
+    for (const q of liveQuestions) {
+      const ev = strictGrade.perQuestion[q.id];
+      if (!ev) continue;
+      if (ev.serializedAnswer) {
+        responsesMap[q.id] = ev.serializedAnswer;
+      }
+      const wasSelfChecked = Boolean(session.checked[q.id]?.selfChecked);
+      nextChecked[q.id] = {
+        attempted: ev.attempted,
+        isCorrect: ev.isCorrect,
+        marksAwarded: ev.marksAwarded,
+        maxMarks: ev.maxMarks,
+        selfChecked: wasSelfChecked,
+      };
+      // Strictly ONLY record graded attempts; NEVER penalize or mark unkeyed questions wrong
+      if (ev.hasKey && ev.attempted) {
+        onRecordAttempt(q.id, ev.isCorrect, ev.marksAwarded, ev.maxMarks, ev.serializedAnswer);
+      }
+    }
+
+    const attemptedTotal =
+      strictGrade.gradedAttemptedCount + strictGrade.pendingAttemptedCount;
 
     if (!session.finished) {
+      const historyMode: TestHistoryEntry['mode'] =
+        session.dailyKind === 'dpp'
+          ? 'daily_dpp'
+          : session.dailyKind === 'ga' || session.isGaSprint
+          ? 'daily_ga'
+          : session.mode === 'cbt_mock'
+          ? 'timed'
+          : 'practice';
+
+      const now = new Date();
+      const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+      if (onRecordTestHistory) {
+        onRecordTestHistory({
+          id: `test_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          title: session.title,
+          mode: historyMode,
+          date: localDate,
+          completedAt: now.toISOString(),
+          durationSeconds: session.elapsedSeconds,
+          questionIds: liveQuestions.map((q) => q.id),
+          responses: responsesMap,
+          gradedMarks: strictGrade.gradedMarks,
+          gradedMaxMarks: strictGrade.gradedMaxMarks,
+          totalMaxMarks: strictGrade.totalMaxMarks,
+          gradedCount: strictGrade.gradedCount,
+          gradedAttemptedCount: strictGrade.gradedAttemptedCount,
+          pendingKeyCount: strictGrade.pendingKeyCount,
+          correctCount: strictGrade.correctCount,
+          wrongCount: strictGrade.wrongCount,
+          unattemptedCount: strictGrade.unattemptedCount,
+          penaltyMarks: strictGrade.penaltyMarks,
+          accuracyPct: strictGrade.accuracyPct,
+        });
+      }
+
       if (session.dailyKind === 'dpp' && onCompleteDailyDpp) {
         onCompleteDailyDpp({
           dateIst: session.dailyDateIst,
           questionIds: liveQuestions.map((q) => q.id),
-          score: roundedMarks,
-          maxMarks,
-          accuracy: accuracyPct,
+          score: strictGrade.gradedMarks,
+          maxMarks: strictGrade.totalMaxMarks,
+          gradedMaxMarks: strictGrade.gradedMaxMarks,
+          pendingKeyCount: strictGrade.pendingKeyCount,
+          accuracy: strictGrade.accuracyPct,
           attemptedCount: attemptedTotal,
-          correctCount,
+          correctCount: strictGrade.correctCount,
           durationSeconds: session.elapsedSeconds,
           responses: responsesMap,
         });
@@ -636,11 +677,13 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
         onCompleteDailyGa({
           dateIst: session.dailyDateIst,
           questionIds: liveQuestions.map((q) => q.id),
-          score: roundedMarks,
-          maxMarks,
-          accuracy: accuracyPct,
+          score: strictGrade.gradedMarks,
+          maxMarks: strictGrade.totalMaxMarks,
+          gradedMaxMarks: strictGrade.gradedMaxMarks,
+          pendingKeyCount: strictGrade.pendingKeyCount,
+          accuracy: strictGrade.accuracyPct,
           attemptedCount: attemptedTotal,
-          correctCount,
+          correctCount: strictGrade.correctCount,
           durationSeconds: session.elapsedSeconds,
           responses: responsesMap,
         });
@@ -649,10 +692,10 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
       if (session.isGaSprint && onCompleteGaSprint) {
         onCompleteGaSprint({
           questionsCount: liveQuestions.length,
-          correctCount,
-          marksAwarded: roundedMarks,
-          maxMarks,
-          accuracyPct,
+          correctCount: strictGrade.correctCount,
+          marksAwarded: strictGrade.gradedMarks,
+          maxMarks: strictGrade.gradedMaxMarks || strictGrade.totalMaxMarks,
+          accuracyPct: strictGrade.accuracyPct,
           durationSeconds: session.elapsedSeconds,
         });
       }
@@ -667,8 +710,11 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
     session.dailyDateIst,
     session.finished,
     session.elapsedSeconds,
+    session.mode,
+    session.title,
     liveQuestions,
     onRecordAttempt,
+    onRecordTestHistory,
     onCompleteGaSprint,
     onCompleteDailyDpp,
     onCompleteDailyGa,
@@ -678,6 +724,8 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
   // Shared Review / Verification Card used in Practice Sprint & Score Report
   const renderReviewPanel = (q: Question, evalRes: EvaluationResult & { selfChecked?: boolean }) => {
     const hasKey = questionHasKey(q);
+    const showGateOverflow = hasGateOverflowUrl(q);
+    const isEditingKey = Boolean(editingKeyIds[q.id]);
     const isVerifying = Boolean(verifyingIds[q.id]);
     const feedback = verifyFeedback[q.id];
     const mistakeEntry = state.mistakes[q.id];
@@ -686,14 +734,23 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
 
     const officialKeyLabel =
       q.format === 'MCQ'
-        ? q.correctOption
+        ? q.correctOption ?? ''
         : q.format === 'MSQ'
-        ? q.correctOptions?.join(', ')
+        ? q.correctOptions?.join(', ') ?? ''
         : typeof q.natRangeMin === 'number' &&
           typeof q.natRangeMax === 'number' &&
           q.natRangeMin !== q.natRangeMax
         ? `${q.natRangeMin} to ${q.natRangeMax}${q.natUnit ? ` ${q.natUnit}` : ''}`
-        : `${q.natAnswer}${q.natUnit ? ` ${q.natUnit}` : ''}`;
+        : `${q.natAnswer ?? ''}${q.natUnit ? ` ${q.natUnit}` : ''}`;
+
+    const editableKeySeed =
+      q.format === 'MCQ'
+        ? q.correctOption ?? ''
+        : q.format === 'MSQ'
+        ? q.correctOptions?.join(', ') ?? ''
+        : q.natAnswer !== undefined
+        ? String(q.natAnswer)
+        : '';
 
     return (
       <div
@@ -705,7 +762,9 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             {hasKey || evalRes.selfChecked ? (
               <>
-                {evalRes.isCorrect ? (
+                {!evalRes.attempted ? (
+                  <AlertTriangle className="h-4 w-4 text-[#8C7E75]" />
+                ) : evalRes.isCorrect ? (
                   <CheckCircle2 className="h-4 w-4 text-[#2E5E3E] dark:text-[#7BB88F]" />
                 ) : (
                   <XCircle className="h-4 w-4 text-[#B83227] dark:text-[#F08A80]" />
@@ -727,26 +786,51 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
                 </span>
               </>
             ) : (
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#8B6209] dark:text-[#E0A92E]">
-                <KeyRound className="h-3.5 w-3.5" />
-                Verify Answer via GateOverflow, Self-Check, or Free-Tier AI
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  data-testid={`pending-key-badge-${q.id}`}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-[#EED89A] dark:border-[#5C441B] bg-[#FDF6E3] dark:bg-[#2C2215] text-[11px] font-bold text-[#8B6209] dark:text-[#E0A92E]"
+                >
+                  <KeyRound className="h-3 w-3" />
+                  Pending Answer Key
+                </span>
+                <span className="text-xs font-medium text-[#61554D] dark:text-[#A99B8E]">
+                  Excluded from score &amp; penalties until key is verified
+                </span>
                 {userSel && (
-                  <span className="font-mono ml-1 px-2 py-0.5 rounded-full bg-[#EFE9DF] dark:bg-[#2E2520] text-[#1C1613] dark:text-[#F5F0E8]">
+                  <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-[#EFE9DF] dark:bg-[#2E2520] text-[#1C1613] dark:text-[#F5F0E8]">
                     Your Pick: {userSel}
                   </span>
                 )}
-              </span>
+              </div>
             )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             {hasKey && (
-              <span className="font-mono text-xs font-bold px-3 py-1 rounded-full bg-[#FFFFFF] dark:bg-[#1C1714] border border-[#E8E0D5] dark:border-[#352A24] text-[#1C1613] dark:text-[#F5F0E8]">
-                Official Key: {officialKeyLabel}
-              </span>
+              <>
+                <span className="font-mono text-xs font-bold px-3 py-1 rounded-full bg-[#FFFFFF] dark:bg-[#1C1714] border border-[#E8E0D5] dark:border-[#352A24] text-[#1C1613] dark:text-[#F5F0E8]">
+                  Official Key: {officialKeyLabel}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingKeyIds((prev) => ({ ...prev, [q.id]: !prev[q.id] }));
+                    setManualKeyDrafts((prev) => ({
+                      ...prev,
+                      [q.id]: prev[q.id] ?? editableKeySeed,
+                    }));
+                  }}
+                  data-testid={`edit-key-btn-${q.id}`}
+                  className="inline-flex items-center gap-1 h-8 px-3 rounded-full border border-[#E8E0D5] dark:border-[#352A24] bg-[#FFFFFF] dark:bg-[#1C1714] text-[11px] font-semibold text-[#61554D] dark:text-[#D8CBB8] hover:border-[#C89216] press-tactile"
+                >
+                  <Pencil className="h-3 w-3" />
+                  {isEditingKey ? 'Cancel' : 'Edit Key'}
+                </button>
+              </>
             )}
 
-            {q.sourceUrl && (
+            {showGateOverflow ? (
               <a
                 href={q.sourceUrl}
                 target="_blank"
@@ -757,64 +841,81 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
                 Open GateOverflow Solution
                 <ExternalLink className="h-3.5 w-3.5" />
               </a>
+            ) : (
+              hasKey && (
+                <span
+                  data-testid="verified-solution-badge"
+                  className="inline-flex items-center gap-1 h-8 px-3 rounded-full border border-[#B9D6C2] dark:border-[#264D34] bg-[#EBF5EE] dark:bg-[#152B1D] text-[11px] font-semibold text-[#2E5E3E] dark:text-[#7BB88F]"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Verified Solution
+                </span>
+              )
             )}
           </div>
         </div>
 
-        {/* Unverified Question Controls: Self-Check Pills + Save Key + Solve & Verify with AI */}
-        {!hasKey && (
+        {/* Unverified OR Inline Edit Official Key Controls */}
+        {(!hasKey || isEditingKey) && (
           <div className="rounded-[18px] border border-[#EED89A] dark:border-[#5C441B] bg-[#FFFFFF] dark:bg-[#1C1714] p-3.5 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2.5">
-              {/* 1. One-Click Self-Check Pills */}
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-semibold text-[#61554D] dark:text-[#A99B8E]">
-                  Self-Check (Offline):
-                </span>
+            {!hasKey && (
+              <div className="flex flex-wrap items-center justify-between gap-2.5">
+                {/* 1. One-Click Self-Check Pills */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-semibold text-[#61554D] dark:text-[#A99B8E]">
+                    Self-Check:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleSelfCheck(q, true)}
+                    className="inline-flex items-center gap-1 h-8 px-3.5 rounded-full border border-[#2E5E3E] bg-[#EBF5EE] hover:bg-[#DDF0E3] dark:bg-[#152B1D] text-xs font-semibold text-[#2E5E3E] dark:text-[#7BB88F] press-tactile"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                    I Got It Right ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSelfCheck(q, false)}
+                    className="inline-flex items-center gap-1 h-8 px-3.5 rounded-full border border-[#B83227] bg-[#FBEAE8] hover:bg-[#F7DAD6] dark:bg-[#3A1E1B] text-xs font-semibold text-[#B83227] dark:text-[#F08A80] press-tactile"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    I Got It Wrong ✗
+                  </button>
+                </div>
+
+                {/* 2. On-Demand AI Verifier */}
                 <button
                   type="button"
-                  onClick={() => handleSelfCheck(q, true)}
-                  className="inline-flex items-center gap-1 h-8 px-3.5 rounded-full border border-[#2E5E3E] bg-[#EBF5EE] hover:bg-[#DDF0E3] dark:bg-[#152B1D] text-xs font-semibold text-[#2E5E3E] dark:text-[#7BB88F] press-tactile"
+                  disabled={isVerifying}
+                  onClick={() => void handleAiVerifyQuestion(q)}
+                  data-testid="solve-verify-ai-btn"
+                  className="inline-flex items-center gap-1.5 h-8 px-4 rounded-full bg-[#241914] hover:bg-[#33241D] dark:bg-[#E0A92E] dark:text-[#1C1613] text-[#FAF5EB] text-xs font-semibold disabled:opacity-50 press-tactile"
                 >
-                  <Check className="h-3.5 w-3.5" />
-                  I Got It Right ✓
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelfCheck(q, false)}
-                  className="inline-flex items-center gap-1 h-8 px-3.5 rounded-full border border-[#B83227] bg-[#FBEAE8] hover:bg-[#F7DAD6] dark:bg-[#3A1E1B] text-xs font-semibold text-[#B83227] dark:text-[#F08A80] press-tactile"
-                >
-                  <X className="h-3.5 w-3.5" />
-                  I Got It Wrong ✗
+                  {isVerifying ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5 text-[#E0A92E] dark:text-[#1C1613]" />
+                  )}
+                  {isVerifying ? 'Verifying...' : 'Verify with AI'}
                 </button>
               </div>
+            )}
 
-              {/* 2. On-Demand Free-Tier AI Verifier */}
-              <button
-                type="button"
-                disabled={isVerifying}
-                onClick={() => void handleAiVerifyQuestion(q)}
-                data-testid="solve-verify-ai-btn"
-                className="inline-flex items-center gap-1.5 h-8 px-4 rounded-full bg-[#241914] hover:bg-[#33241D] dark:bg-[#E0A92E] dark:text-[#1C1613] text-[#FAF5EB] text-xs font-semibold disabled:opacity-50 press-tactile"
-              >
-                {isVerifying ? (
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Sparkles className="h-3.5 w-3.5 text-[#E0A92E] dark:text-[#1C1613]" />
-                )}
-                {isVerifying ? 'Solving & Caching...' : 'Solve & Verify with AI'}
-              </button>
-            </div>
-
-            {/* Optional Permanent Official Answer Key Input */}
-            <div className="flex flex-wrap items-center gap-2 pt-2.5 border-t border-[#EFE9DF] dark:border-[#2E2520]">
+            {/* Permanent Official Answer Key Input (recalculates score & history immediately) */}
+            <div
+              className={`flex flex-wrap items-center gap-2 ${
+                !hasKey ? 'pt-2.5 border-t border-[#EFE9DF] dark:border-[#2E2520]' : ''
+              }`}
+            >
               <label
                 htmlFor={`save-key-${q.id}`}
                 className="text-[11px] font-medium text-[#61554D] dark:text-[#A99B8E]"
               >
-                Save official key to Firestore for future auto-grading:
+                {hasKey ? 'Update Official Answer Key:' : 'Official Answer Key:'}
               </label>
               <input
                 id={`save-key-${q.id}`}
+                data-testid={`manual-key-input-${q.id}`}
                 type="text"
                 value={manualKeyDrafts[q.id] ?? ''}
                 onChange={(e) =>
@@ -831,6 +932,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
               />
               <button
                 type="button"
+                data-testid={`save-key-btn-${q.id}`}
                 onClick={() => void handleSaveManualKey(q)}
                 className="h-8 px-3.5 rounded-full border border-[#C89216] bg-[#FDF6E3] dark:bg-[#2C2215] text-xs font-semibold text-[#8B6209] dark:text-[#E0A92E] hover:bg-[#F9ECCB] press-tactile"
               >
@@ -838,7 +940,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
               </button>
               {manualKeySaved[q.id] && (
                 <span className="text-[11px] font-semibold text-[#2E5E3E] dark:text-[#7BB88F]">
-                  Saved!
+                  Saved &amp; Recalculated!
                 </span>
               )}
             </div>
@@ -969,27 +1071,37 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
 
   // ===================== SUBMIT & SCORE REPORT SCREEN =====================
   if (session.finished) {
+    const selfCheckOverrides: Record<string, 'correct' | 'wrong'> = {};
+    for (const q of liveQuestions) {
+      const prevCheck = session.checked[q.id];
+      if (prevCheck?.selfChecked && prevCheck.attempted) {
+        selfCheckOverrides[q.id] = prevCheck.isCorrect ? 'correct' : 'wrong';
+      }
+    }
+
+    const strictSummary = gradeTestSessionStrict(
+      liveQuestions,
+      session.responses,
+      selfCheckOverrides
+    );
+
     const results = liveQuestions.map((q) => {
-      const evalRes = session.checked[q.id] ?? {
-        attempted: hasAnswerResponse(session.responses[q.id]),
-        isCorrect: false,
-        marksAwarded: 0,
+      const ev = strictSummary.perQuestion[q.id];
+      const evalRes: EvaluationResult & { selfChecked?: boolean } = {
+        attempted: ev?.attempted ?? hasAnswerResponse(session.responses[q.id]),
+        isCorrect: ev?.isCorrect ?? false,
+        marksAwarded: ev?.marksAwarded ?? 0,
         maxMarks: q.marks,
+        selfChecked: Boolean(session.checked[q.id]?.selfChecked),
       };
       return { q, res: evalRes };
     });
 
-    const gradedResults = results.filter(
-      ({ q, res }) => questionHasKey(q) || res.selfChecked
-    );
-    const totalMarks = gradedResults.reduce((acc, r) => acc + r.res.marksAwarded, 0);
-    const maxMarks = results.reduce((acc, r) => acc + r.q.marks, 0);
-    const attemptedCount = results.filter((r) => r.res.attempted).length;
-    const correctCount = gradedResults.filter((r) => r.res.isCorrect).length;
-    const gradedAttempted = gradedResults.filter((r) => r.res.attempted).length;
-    const accuracy =
-      gradedAttempted > 0 ? Math.round((correctCount / gradedAttempted) * 100) : 0;
-    const pendingVerifyCount = results.length - gradedResults.length;
+    const gradedScoreSummaryText = formatGradedScoreSummary(strictSummary);
+    const attemptedCount =
+      strictSummary.gradedAttemptedCount + strictSummary.pendingAttemptedCount;
+    const accuracy = strictSummary.accuracyPct;
+    const pendingVerifyCount = strictSummary.pendingKeyCount;
 
     const paceAnalytics = computeSprintPaceAnalytics(liveQuestions, session.questionSeconds ?? {});
     const userAnswersMap: Record<string, string> = {};
@@ -1017,7 +1129,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
                   onRequestPdfExport({
                     kind: 'test-pack',
                     title: session.title,
-                    subtitle: `Score: ${totalMarks.toFixed(2)}/${maxMarks} · Accuracy: ${accuracy}%`,
+                    subtitle: `${gradedScoreSummaryText} · Accuracy: ${accuracy}%`,
                     questions: liveQuestions,
                     defaultLayout: 'solutions',
                     userAnswers: userAnswersMap,
@@ -1046,24 +1158,39 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="rounded-[20px] squircle border border-[#EED89A] dark:border-[#5C441B] bg-[#FDF6E3] dark:bg-[#2C2215] p-4">
               <div className="text-xs text-[#8B6209] dark:text-[#E0A92E]">Graded Net Score</div>
-              <div className="mt-1 font-mono text-2xl font-bold tabular-nums text-[#6E261A] dark:text-[#F5F0E8]">
-                {totalMarks.toFixed(2)} / {maxMarks}
+              <div
+                data-testid="score-report-graded-summary"
+                className="mt-1 font-mono text-lg sm:text-xl font-bold tabular-nums text-[#6E261A] dark:text-[#F5F0E8]"
+              >
+                {gradedScoreSummaryText}
               </div>
+              {strictSummary.penaltyMarks > 0 && (
+                <p className="text-[11px] font-mono text-[#B83227] dark:text-[#F08A80] mt-0.5">
+                  Negative Penalty: −{strictSummary.penaltyMarks.toFixed(2)}M
+                </p>
+              )}
             </div>
             <div className="rounded-[20px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] p-4">
               <div className="text-xs text-[#61554D] dark:text-[#A99B8E]">Graded Accuracy</div>
-              <div className="mt-1 font-mono text-2xl font-bold tabular-nums text-[#2E5E3E] dark:text-[#7BB88F]">
-                {accuracy}%
+              <div
+                data-testid="score-report-accuracy"
+                className="mt-1 font-mono text-2xl font-bold tabular-nums text-[#2E5E3E] dark:text-[#7BB88F]"
+              >
+                {strictSummary.gradedAttemptedCount > 0 ? `${accuracy}%` : '—'}
               </div>
+              <p className="text-[11px] font-mono text-[#61554D] dark:text-[#A99B8E] mt-0.5">
+                {strictSummary.correctCount}✓ · {strictSummary.wrongCount}✗ of{' '}
+                {strictSummary.gradedAttemptedCount} graded
+              </p>
             </div>
             <div className="rounded-[20px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] p-4">
-              <div className="text-xs text-[#61554D] dark:text-[#A99B8E]">Attempted / Verified</div>
+              <div className="text-xs text-[#61554D] dark:text-[#A99B8E]">Attempted / Graded</div>
               <div className="mt-1 font-mono text-2xl font-bold tabular-nums text-[#1C1613] dark:text-[#F5F0E8]">
-                {attemptedCount} / {gradedResults.length}
+                {attemptedCount} / {strictSummary.gradedCount}
               </div>
               {pendingVerifyCount > 0 && (
                 <p className="text-[11px] text-[#8B6209] dark:text-[#E0A92E] mt-0.5">
-                  {pendingVerifyCount} awaiting key check below
+                  {pendingVerifyCount} Pending Answer Key
                 </p>
               )}
             </div>
@@ -1229,8 +1356,8 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
     <div className="space-y-4 pb-28 lg:pb-6" data-no-swipe="true">
       {/* CBT Exam Hall Header Bar (Single-row horizontally scrollable utilities on mobile) */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 rounded-[24px] squircle border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FFFFFF] dark:bg-[#1C1714] px-3.5 sm:px-5 py-2.5 sm:py-3 shadow-warm">
-        <div className="flex items-center justify-between md:justify-start gap-2 min-w-0">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center justify-between md:justify-start gap-2 min-w-0 md:flex-1">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             <button
               type="button"
               onClick={onExit}
@@ -1238,7 +1365,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
             >
               ← Exit
             </button>
-            <h2 className="font-display text-xs sm:text-sm font-bold text-[#1C1613] dark:text-[#F5F0E8] truncate">
+            <h2 className="font-display text-xs sm:text-sm font-bold text-[#1C1613] dark:text-[#F5F0E8] truncate min-w-0">
               {session.title}
             </h2>
           </div>
@@ -1260,7 +1387,7 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
           </span>
         </div>
 
-        <div className="flex flex-nowrap items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-0.5">
+        <div className="flex flex-nowrap items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-0.5 shrink-0">
           <span
             data-testid="cbt-session-clock"
             className={`hidden md:inline-flex font-mono text-xs font-bold tabular-nums px-3 py-1.5 rounded-full shrink-0 whitespace-nowrap ${
@@ -1481,15 +1608,22 @@ export const PyqCbtSession: React.FC<PyqCbtSessionProps> = ({
                 Out of 2027 Syllabus
               </span>
             )}
-            {currentQ.sourceUrl && (
+            {hasGateOverflowUrl(currentQ) ? (
               <a
                 href={currentQ.sourceUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                data-testid="active-gateoverflow-link"
                 className="inline-flex items-center gap-1 font-semibold text-[#6E261A] dark:text-[#E0A92E] hover:underline ml-auto"
               >
-                {currentQ.sourceUrl.includes('github.com') ? 'GitHub Source ↗' : 'GateOverflow ↗'}
+                GateOverflow ↗
               </a>
+            ) : (
+              hasVerifiedKey && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-[#B9D6C2] dark:border-[#264D34] bg-[#EBF5EE] dark:bg-[#152B1D] font-semibold text-[#2E5E3E] dark:text-[#7BB88F] ml-auto">
+                  Verified Solution
+                </span>
+              )
             )}
           </div>
 

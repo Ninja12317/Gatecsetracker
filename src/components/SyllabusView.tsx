@@ -17,7 +17,7 @@ interface SyllabusViewProps {
   focusedSubjectId: SubjectId | null;
   onClearFocusedSubject: () => void;
   onCycleStatus: (subtopicId: string) => void;
-  onSetConfidence: (subtopicId: string, confidence: number) => void;
+  onSetConfidence?: (subtopicId: string, confidence: number) => void;
   onMarkRevised: (subtopicId: string) => void;
   onSaveNotes: (subtopicId: string, notes: string) => void;
 }
@@ -62,15 +62,12 @@ export const SyllabusView: React.FC<SyllabusViewProps> = ({
   focusedSubjectId,
   onClearFocusedSubject,
   onCycleStatus,
-  onSetConfidence,
   onMarkRevised,
   onSaveNotes,
 }) => {
   const [filter, setFilter] = useState<SyllabusFilter>('all');
   const [search, setSearch] = useState('');
-  const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(GATE_2027_SYLLABUS.map((s) => [s.id, true]))
-  );
+  const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>({});
   const [activeNoteSubtopic, setActiveNoteSubtopic] = useState<Subtopic | null>(null);
   const [draftNote, setDraftNote] = useState('');
   const [noteSavedToast, setNoteSavedToast] = useState(false);
@@ -88,6 +85,15 @@ export const SyllabusView: React.FC<SyllabusViewProps> = ({
 
   const toggleSubject = (id: string) => {
     setExpandedSubjects((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const allExpanded = GATE_2027_SYLLABUS.every((s) => Boolean(expandedSubjects[s.id]));
+  const toggleExpandAll = () => {
+    if (allExpanded) {
+      setExpandedSubjects({});
+    } else {
+      setExpandedSubjects(Object.fromEntries(GATE_2027_SYLLABUS.map((s) => [s.id, true])));
+    }
   };
 
   const openNotesDrawer = (sub: Subtopic) => {
@@ -113,10 +119,7 @@ export const SyllabusView: React.FC<SyllabusViewProps> = ({
       const status = p?.status ?? 'not_started';
       if (needsSpacedRevision(p)) revDue++;
       if (status !== 'mastered') incomplete++;
-      if (
-        sub.highRoi &&
-        (status === 'not_started' || status === 'concept_done' || (p?.confidence ?? 1) <= 3)
-      ) {
+      if (sub.highRoi && (status === 'not_started' || status === 'concept_done')) {
         highRoiWeak++;
       }
     }
@@ -139,10 +142,7 @@ export const SyllabusView: React.FC<SyllabusViewProps> = ({
       case 'all':
         return true;
       case 'high_roi_weak':
-        return Boolean(
-          sub.highRoi &&
-            (status === 'not_started' || status === 'concept_done' || (p?.confidence ?? 1) <= 3)
-        );
+        return Boolean(sub.highRoi && (status === 'not_started' || status === 'concept_done'));
       case 'needs_revision':
         return needsSpacedRevision(p);
       case 'incomplete':
@@ -160,7 +160,7 @@ export const SyllabusView: React.FC<SyllabusViewProps> = ({
               Official IIT Madras GATE 2027 CSE Syllabus
             </h1>
             <p className="text-xs sm:text-sm text-[#61554D] dark:text-[#A99B8E] mt-1">
-              11 sections · 100 marks · Click any stage pill to cycle status. Topics unrevised for 7+ days are flagged automatically.
+              12 sections · 100 marks · Click any stage pill to cycle status. Topics unrevised for 7+ days are flagged automatically.
             </p>
           </div>
 
@@ -177,55 +177,70 @@ export const SyllabusView: React.FC<SyllabusViewProps> = ({
           </div>
         </div>
 
-        {/* Segmented Filter Pills (Single-row horizontal rail on mobile) */}
-        <div className="mobile-rail-fade">
-          <div
-            className="flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 -mx-1"
-            role="tablist"
-            aria-label="Syllabus filters"
-          >
-            {[
-              { id: 'all' as const, label: `All (${counts.total})` },
-              { id: 'high_roi_weak' as const, label: `High-ROI Weak (${counts.highRoiWeak})` },
-              { id: 'needs_revision' as const, label: `Needs Revision (${counts.revDue})` },
-              { id: 'incomplete' as const, label: `Incomplete (${counts.incomplete})` },
-            ].map((tab) => {
-              const active = filter === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={(e) => {
-                    setFilter(tab.id);
-                    e.currentTarget.scrollIntoView({
-                      behavior: 'smooth',
-                      inline: 'center',
-                      block: 'nearest',
-                    });
-                  }}
-                  className={`shrink-0 whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-semibold press-tactile ${
-                    active
-                      ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-[#FAF8F4]'
-                      : 'bg-[#FAF8F4] dark:bg-[#241D19] text-[#61554D] dark:text-[#A99B8E] border border-[#E8E0D5] dark:border-[#2E2520] hover:text-[#1C1613] dark:hover:text-[#F5F0E8]'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
+        {/* Segmented Filter Pills + Expand/Collapse All Toggle */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="mobile-rail-fade min-w-0 flex-1">
+            <div
+              className="flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 -mx-1"
+              role="tablist"
+              aria-label="Syllabus filters"
+            >
+              {[
+                { id: 'all' as const, label: `All (${counts.total})` },
+                { id: 'high_roi_weak' as const, label: `High-ROI Weak (${counts.highRoiWeak})` },
+                { id: 'needs_revision' as const, label: `Needs Revision (${counts.revDue})` },
+                { id: 'incomplete' as const, label: `Incomplete (${counts.incomplete})` },
+              ].map((tab) => {
+                const active = filter === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={(e) => {
+                      setFilter(tab.id);
+                      e.currentTarget.scrollIntoView({
+                        behavior: 'smooth',
+                        inline: 'center',
+                        block: 'nearest',
+                      });
+                    }}
+                    className={`shrink-0 whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-semibold press-tactile ${
+                      active
+                        ? 'bg-[#6E261A] dark:bg-[#9E3E2E] text-[#FAF8F4]'
+                        : 'bg-[#FAF8F4] dark:bg-[#241D19] text-[#61554D] dark:text-[#A99B8E] border border-[#E8E0D5] dark:border-[#2E2520] hover:text-[#1C1613] dark:hover:text-[#F5F0E8]'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
+
+          <button
+            type="button"
+            data-testid="syllabus-expand-collapse-all"
+            onClick={toggleExpandAll}
+            className="shrink-0 whitespace-nowrap h-8 px-3.5 rounded-full border border-[#E8E0D5] dark:border-[#2E2520] bg-[#FAF8F4] dark:bg-[#241D19] hover:border-[#C89216] text-xs font-semibold text-[#6E261A] dark:text-[#E0A92E] press-tactile"
+          >
+            {allExpanded ? 'Collapse All' : 'Expand All'}
+          </button>
         </div>
       </div>
 
-      {/* 11 Subject Accordion Sections with Smooth CSS Grid Expand/Collapse */}
-      <div className="space-y-4">
+      {/* 12 Subject Accordion Sections (Collapsed by default) */}
+      <div className="space-y-3.5">
         {GATE_2027_SYLLABUS.map((subject, idx) => {
           const visibleSubtopics = subject.subtopics.filter(matchesFilter);
           if (visibleSubtopics.length === 0) return null;
           const mastery = computeSubjectMastery(subject, progress);
-          const isOpen = expandedSubjects[subject.id] ?? true;
+          const completedCount = subject.subtopics.filter((st) => {
+            const stStatus = progress[st.id]?.status;
+            return stStatus === 'pyqs_done' || stStatus === 'mastered';
+          }).length;
+          const isOpen = Boolean(trimmedSearch) || Boolean(expandedSubjects[subject.id]);
 
           return (
             <section
@@ -264,12 +279,19 @@ export const SyllabusView: React.FC<SyllabusViewProps> = ({
                     </span>
                   )}
 
+                  <span className="font-mono text-[11px] tabular-nums text-[#61554D] dark:text-[#A99B8E]">
+                    {completedCount}/{subject.subtopics.length} done
+                  </span>
+
                   <div className="flex items-center gap-2.5 min-w-[120px]">
                     <div className="h-1.5 flex-1 rounded-full bg-[#E8E0D5] dark:bg-[#352A24] overflow-hidden">
-                      <div
-                        className="h-full w-full origin-left rounded-full bg-[#C89216] dark:bg-[#E0A92E] transition-transform duration-300 ease-apple"
-                        style={{ transform: `scaleX(${Math.max(0.02, mastery / 100)})` }}
-                      />
+                      {mastery > 0 && (
+                        <div
+                          data-testid={`syllabus-bar-fill-${subject.id}`}
+                          className="h-full rounded-full bg-[#C89216] dark:bg-[#E0A92E] transition-all duration-300 ease-apple"
+                          style={{ width: `${mastery}%` }}
+                        />
+                      )}
                     </div>
                     <span className="font-mono text-xs font-bold tabular-nums text-[#1C1613] dark:text-[#F5F0E8] w-9 text-right">
                       {mastery}%
@@ -279,8 +301,8 @@ export const SyllabusView: React.FC<SyllabusViewProps> = ({
               </div>
 
               {/* Smooth GPU Accordion Container */}
-              <div className="accordion-grid" data-open={isOpen ? 'true' : 'false'}>
-                <div className="accordion-inner">
+              <div className="accordion-grid" data-open={isOpen ? 'true' : 'false'} aria-hidden={!isOpen}>
+                <div className={isOpen ? 'accordion-inner' : 'accordion-inner invisible pointer-events-none'}>
                   <div className="divide-y divide-[#EFE9DF] dark:divide-[#2E2520] border-t border-[#E8E0D5] dark:border-[#2E2520]">
                     {visibleSubtopics.map((sub) => {
                       const p = progress[sub.id] ?? {
@@ -332,7 +354,7 @@ export const SyllabusView: React.FC<SyllabusViewProps> = ({
                             </div>
                           </div>
 
-                          {/* Interactive Controls: Stage Cycler, Confidence 1-5, Revise Now, Notes */}
+                          {/* Interactive Controls: Stage Cycler, Revise Now, Notes */}
                           <div className="flex flex-wrap items-center gap-2 shrink-0">
                             <button
                               type="button"
@@ -342,32 +364,6 @@ export const SyllabusView: React.FC<SyllabusViewProps> = ({
                             >
                               {statusInfo.label}
                             </button>
-
-                            {/* 1-5 Confidence Selector */}
-                            <div
-                              className="flex items-center gap-0.5 border border-[#E8E0D5] dark:border-[#2E2520] rounded-full p-0.5 bg-[#FAF8F4] dark:bg-[#130F0D]"
-                              role="group"
-                              aria-label={`Confidence rating for ${sub.title}`}
-                            >
-                              {[1, 2, 3, 4, 5].map((level) => {
-                                const active = p.confidence >= level;
-                                return (
-                                  <button
-                                    key={level}
-                                    type="button"
-                                    onClick={() => onSetConfidence(sub.id, level)}
-                                    aria-label={`Set confidence ${level} out of 5 for ${sub.title}`}
-                                    className={`h-6 w-6 rounded-full font-mono text-[11px] font-semibold transition-colors ${
-                                      active
-                                        ? 'bg-[#C89216] dark:bg-[#E0A92E] text-[#1C1613]'
-                                        : 'text-[#8C7E75] dark:text-[#7E7065] hover:text-[#1C1613] dark:hover:text-[#F5F0E8]'
-                                    }`}
-                                  >
-                                    {level}
-                                  </button>
-                                );
-                              })}
-                            </div>
 
                             {revDue && (
                               <button

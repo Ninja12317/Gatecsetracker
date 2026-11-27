@@ -51,7 +51,7 @@ test('normalizeGateRDataset handles real GateR array schema and nested object sc
   assert.equal(fromArray[1].subjectId, 'os');
 
   assert.equal(fromArray[2].format, 'NAT');
-  assert.equal(fromArray[2].subjectId, 'pds');
+  assert.equal(fromArray[2].subjectId, 'cprog');
   assert.equal(fromArray[2].marks, 2);
 
   // Nested object wrapper fallback
@@ -75,12 +75,13 @@ test('detectOutOf2027Syllabus flags removed GATE 2027 topics accurately', () => 
   assert.equal(detectOutOf2027Syllabus(['computer-networks', 'tcp', 'congestion-control']), false);
 });
 
-test('mapTagsToSubjectId maps all 11 GATE CSE subjects cleanly', () => {
+test('mapTagsToSubjectId maps all 12 GATE CSE subjects cleanly', () => {
   assert.equal(mapTagsToSubjectId(['quantitative-aptitude']), 'ga');
   assert.equal(mapTagsToSubjectId(['linear-algebra']), 'em');
   assert.equal(mapTagsToSubjectId(['digital-logic']), 'dl');
   assert.equal(mapTagsToSubjectId(['co-and-architecture']), 'coa');
-  assert.equal(mapTagsToSubjectId(['data-structures']), 'pds');
+  assert.equal(mapTagsToSubjectId(['programming-in-c']), 'cprog');
+  assert.equal(mapTagsToSubjectId(['data-structures']), 'ds');
   assert.equal(mapTagsToSubjectId(['algorithms']), 'algo');
   assert.equal(mapTagsToSubjectId(['theory-of-computation']), 'toc');
   assert.equal(mapTagsToSubjectId(['compiler-design']), 'cd');

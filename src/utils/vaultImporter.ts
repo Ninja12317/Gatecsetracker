@@ -10,13 +10,16 @@ import type {
   VaultSource,
 } from '../types/index.ts';
 import { SUBJECT_MAP } from '../data/syllabus.ts';
+import { classifyPdsToCprogOrDs } from './subjectMigration.ts';
+import { findMatchingPyqsForVaultCard } from './vaultMatcher.ts';
 
 export const VALID_VAULT_SUBJECTS: GateSubject[] = [
   'ga',
   'em',
   'dl',
   'coa',
-  'pds',
+  'cprog',
+  'ds',
   'algo',
   'toc',
   'cd',
@@ -70,15 +73,17 @@ const SUBJECT_ALIASES: Record<string, GateSubject> = {
   'computer architecture': 'coa',
   'computer organization and architecture': 'coa',
   'computer organization & architecture': 'coa',
-  pds: 'pds',
-  ds: 'pds',
-  dsa: 'pds',
-  c: 'pds',
-  'c programming': 'pds',
-  'programming': 'pds',
-  'data structures': 'pds',
-  'programming & data structures': 'pds',
-  'programming and data structures': 'pds',
+  cprog: 'cprog',
+  c: 'cprog',
+  'c programming': 'cprog',
+  'c-programming': 'cprog',
+  'programming in c': 'cprog',
+  programming: 'cprog',
+  ds: 'ds',
+  dsa: 'ds',
+  'data structure': 'ds',
+  'data structures': 'ds',
+  'data-structures': 'ds',
   algo: 'algo',
   alg: 'algo',
   algorithms: 'algo',
@@ -130,11 +135,15 @@ const SUBJECT_KEYWORDS: Record<GateSubject, string[]> = {
     'pc-relative', 'dma', 'cycle stealing', 'microprogram', 'interleaving', 'vipt', 'amdahl',
     'magnetic disk', 'seek time', 'rotational latency', 'cylinder', 'secondary storage',
   ],
-  pds: [
-    'pointer', 'sizeof', 'struct', 'union', 'static', 'recursion', 'linked list',
-    'circular queue', 'postfix', 'prefix', 'infix', 'binary tree', 'inorder', 'preorder',
-    'postorder', 'bst', 'avl', 'heap', 'build-heap', 'hashing', 'linear probing', 'chaining',
-    'printf', 'malloc', 'array decay',
+  cprog: [
+    'pointer', 'sizeof', 'struct', 'union', 'static', 'recursion', 'printf', 'malloc',
+    'calloc', 'array decay', 'sequence point', 'short circuit', 'macro', 'storage class',
+    'parameter passing', 'scoping', 'bitwise', 'string literal', 'dangling pointer',
+  ],
+  ds: [
+    'linked list', 'circular queue', 'queue', 'stack', 'postfix', 'prefix', 'infix',
+    'binary tree', 'inorder', 'preorder', 'postorder', 'bst', 'avl', 'heap', 'build-heap',
+    'hashing', 'linear probing', 'chaining', 'adjacency list', 'adjacency matrix', 'catalan',
   ],
   algo: [
     'asymptotic', 'big o', 'theta', 'omega', 'master theorem', 'recurrence', 'quicksort',
@@ -195,6 +204,17 @@ export function inferSubjectFromInput(
 ): { subject: GateSubject; autoCategorized: boolean } {
   if (typeof rawSubject === 'string') {
     const norm = rawSubject.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (
+      norm === 'pds' ||
+      norm === 'programming & data structures' ||
+      norm === 'programming and data structures' ||
+      norm === 'prog & ds'
+    ) {
+      return {
+        subject: classifyPdsToCprogOrDs({ text: fallbackText }),
+        autoCategorized: false,
+      };
+    }
     if (SUBJECT_ALIASES[norm]) {
       return { subject: SUBJECT_ALIASES[norm], autoCategorized: false };
     }
@@ -829,44 +849,19 @@ export function tipItemToVaultCard(tip: TipItem, defaultSource: VaultSource = 'C
 }
 
 /**
- * Matches GateR / PYQ bank questions to a VaultCard via subject + tagMatchKeywords
- * so clicking "Drill Matching GateR PYQs →" launches a hyper-relevant sprint.
+ * Matches PYQ bank questions to a VaultCard via weighted tag + subtopic + title + body scoring.
  */
 export function matchPyqsForVaultCard(
   card: VaultCard,
   allQuestions: Question[],
   maxCount = 12
 ): Question[] {
-  const subjectPool = allQuestions.filter(
-    (q) => q.subjectId === card.subject && !q.isOutOf2027Syllabus
-  );
-  if (subjectPool.length === 0) return [];
-
-  const keywords = [
-    ...card.tagMatchKeywords,
-    ...card.subtopic.toLowerCase().split(/[\s,/—-]+/).filter((w) => w.length >= 3),
-  ].map((k) => k.toLowerCase());
-
-  const scored = subjectPool.map((q) => {
-    const hay = `${q.subtopic || ''} ${q.title || ''} ${(q.tags ?? []).join(' ')} ${q.prompt || ''}`.toLowerCase();
-    let score = 0;
-    for (const kw of keywords) {
-      if (hay.includes(kw)) {
-        score += kw.length >= 5 ? 3 : 2;
-      }
-    }
-    return { q, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score || (b.q.year ?? 0) - (a.q.year ?? 0));
-  const matched = scored.filter((s) => s.score > 0).map((s) => s.q);
-  const finalList = matched.length >= 3 ? matched : scored.map((s) => s.q);
-  return finalList.slice(0, maxCount);
+  return findMatchingPyqsForVaultCard(card, allQuestions, undefined, maxCount).questions;
 }
 
 export const AI_BULK_VAULT_PROMPT = `Generate 50 exam-grade GATE CSE 2027 Formula, Exam Trap, Counter-Example & Shortcut cards in STRICT valid JSON array format (no prose outside JSON).
 Strictly EXCLUDE removed 2027 syllabus topics (COA Secondary Storage/Magnetic Disk; CN ARP, ICMP, DHCP, SMTP, FTP, UDP).
-Use ONLY these exact subject codes: "ga", "em", "dl", "coa", "pds", "algo", "toc", "cd", "os", "dbms", "cn".
+Use ONLY these exact subject codes: "ga", "em", "dl", "coa", "cprog", "ds", "algo", "toc", "cd", "os", "dbms", "cn".
 Use ONLY these exact kind values: "FORMULA", "TRAP", "SHORTCUT", "TIP", "COUNTER_EXAMPLE", "EDGE_CASE".
 
 JSON Schema:

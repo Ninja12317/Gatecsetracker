@@ -359,15 +359,31 @@ const TAG_TO_SUBJECT: Array<{ subjectId: SubjectId; patterns: string[] }> = [
     ],
   },
   {
-    subjectId: 'pds',
+    subjectId: 'cprog',
     patterns: [
       'programming-in-c',
+      'c-programming',
       'programming',
-      'data-structures',
       'pointers',
       'recursion',
       'arrays',
       'strings',
+      'output',
+      'parameter-passing',
+      'scoping',
+      'structures',
+      'unions',
+      'storage-classes',
+      'macros',
+      'operators',
+      'functions',
+      'bitwise',
+    ],
+  },
+  {
+    subjectId: 'ds',
+    patterns: [
+      'data-structures',
       'linked-list',
       'stack',
       'queue',
@@ -378,13 +394,8 @@ const TAG_TO_SUBJECT: Array<{ subjectId: SubjectId; patterns: string[] }> = [
       'binary-heap',
       'heap',
       'graphs',
-      'output',
-      'parameter-passing',
-      'scoping',
-      'structures',
-      'unions',
-      'storage-classes',
-      'c-programming',
+      'hashing',
+      'priority-queue',
     ],
   },
   {
@@ -544,7 +555,8 @@ export function mapTagsToSubjectId(tags: string[], title = '', plainText = ''): 
   if (/\b(cache|pipeline|hit ratio|addressing mode|ieee 754|dma|interrupt|alu)\b/.test(hay)) return 'coa';
   if (/\b(flip-flop|k-map|multiplexer|boolean|2's complement|nand|nor|sequential circuit|counter)\b/.test(hay)) return 'dl';
   if (/\b(time complexity|asymptotic|dynamic programming|dijkstra|kruskal|quicksort|mergesort|np-complete|mst|recurrence)\b/.test(hay)) return 'algo';
-  if (/\b(#include|printf|malloc|pointer|linked list|binary search tree|avl|max-heap|min-heap|stack|queue)\b/.test(hay)) return 'pds';
+  if (/\b(#include|printf|scanf|malloc|calloc|pointer|typedef|struct|union|static int|extern)\b/.test(hay)) return 'cprog';
+  if (/\b(linked list|binary search tree|avl|max-heap|min-heap|b-tree|stack|queue|hash table|binary tree)\b/.test(hay)) return 'ds';
   if (/\b(eigenvalue|matrix|determinant|probability|bayes|propositional|predicate|poset|lattice|graph has|chromatic|integral|limit)\b/.test(hay)) return 'em';
 
   return 'ga';
@@ -567,7 +579,8 @@ export function extractSubtopicLabel(tags: string[], subjectId: SubjectId): stri
     em: 'Engineering Mathematics',
     dl: 'Digital Logic',
     coa: 'Computer Organization',
-    pds: 'Programming & DS',
+    cprog: 'C Programming',
+    ds: 'Data Structures',
     algo: 'Algorithms',
     toc: 'Theory of Computation',
     cd: 'Compiler Design',

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ArrowLeft, ArrowRight, AlertTriangle } from 'lucide-react';
-import type { NavView, PdfExportRequest, Question, SubjectId, VaultCard } from './types';
+import type { NavView, PdfExportRequest, SubjectId, VaultCard } from './types';
 import { useWarRoomStore } from './hooks/useWarRoomStore';
 import {
   computeStudyStreak,
@@ -8,7 +8,7 @@ import {
   toLocalIsoDate,
 } from './utils/gateMath';
 import { isSrsCardDueToday, makeSrsCardId } from './utils/examPolish';
-import { matchPyqsForVaultCard } from './utils/vaultImporter';
+import type { VaultPyqMatchResult } from './utils/vaultMatcher';
 import {
   SIMPLE_MODE_CORE_TABS,
   VIEW_HEADER_TITLES,
@@ -26,7 +26,7 @@ import { DashboardView } from './components/DashboardView';
 import { FocusStudioView } from './components/FocusStudioView';
 import { FloatingFocusMiniPill } from './components/FloatingFocusMiniPill';
 import { SyllabusView } from './components/SyllabusView';
-import { PyqStudioView } from './components/PyqStudioView';
+import { PyqStudioView, type ConceptDrillContext } from './components/PyqStudioView';
 import { CsLabView } from './components/CsLabView';
 import { RapidRevisionView } from './components/RapidRevisionView';
 import { TipsVaultView } from './components/TipsVaultView';
@@ -87,11 +87,7 @@ export default function App() {
   const [launchSketchpadSprintTrigger, setLaunchSketchpadSprintTrigger] = useState(0);
   const [exitPyqSessionTrigger, setExitPyqSessionTrigger] = useState(0);
   const [resetPyqStudioTabTrigger, setResetPyqStudioTabTrigger] = useState(0);
-  const [vaultDrillRequest, setVaultDrillRequest] = useState<{
-    nonce: number;
-    title: string;
-    questions: Question[];
-  } | null>(null);
+  const [conceptDrillContext, setConceptDrillContext] = useState<ConceptDrillContext | null>(null);
   const [confirmExitTimedTestOpen, setConfirmExitTimedTestOpen] = useState(false);
 
   const [pyqSessionInfo, setPyqSessionInfo] = useState<{
@@ -100,7 +96,7 @@ export default function App() {
     finished: boolean;
     title: string;
     sketchpadOpen: boolean;
-    studioTab: 'practice' | 'mistakes' | 'resources';
+    studioTab: 'practice' | 'history' | 'mistakes' | 'resources';
   }>({
     active: false,
     isTimed: false,
@@ -326,21 +322,24 @@ export default function App() {
   }, [navigateTo]);
 
   const handleDrillMatchingPyqs = useCallback(
-    (card: VaultCard) => {
-      const matched = matchPyqsForVaultCard(card, store.allQuestions, 12);
-      if (matched.length === 0) {
+    (card: VaultCard, matchResult: VaultPyqMatchResult) => {
+      if (matchResult.questions.length === 0) {
         handlePdfDownloadSuccess('No matching PYQs found in bank for this topic yet.');
         return;
       }
       const subjCode = SUBJECT_MAP[card.subject]?.code ?? card.subject.toUpperCase();
-      setVaultDrillRequest({
+      setConceptDrillContext({
         nonce: Date.now(),
-        title: `${subjCode} Vault Drill · ${card.subtopic}`,
-        questions: matched,
+        cardTitle: card.title,
+        subjectId: card.subject,
+        subtopic: card.subtopic,
+        questions: matchResult.questions,
+        matchedCount: matchResult.strictMatchCount,
+        usedSubjectFallback: matchResult.usedSubjectFallback,
       });
       navigateTo('pyq', { subContext: `pyq:vault_${card.subject}`, label: `${subjCode} Drill` });
     },
-    [store.allQuestions, navigateTo, handlePdfDownloadSuccess]
+    [navigateTo, handlePdfDownloadSuccess]
   );
 
   const handlePyqSessionStateChange = useCallback(
@@ -350,7 +349,7 @@ export default function App() {
       finished: boolean;
       title: string;
       sketchpadOpen: boolean;
-      studioTab: 'practice' | 'mistakes' | 'resources';
+      studioTab: 'practice' | 'history' | 'mistakes' | 'resources';
     }) => {
       setPyqSessionInfo((prev) => {
         if (
@@ -504,6 +503,7 @@ export default function App() {
       if (pyqSessionInfo.active) {
         return pyqSessionInfo.finished ? 'Score Report' : pyqSessionInfo.title || 'PYQ Sprint';
       }
+      if (pyqSessionInfo.studioTab === 'history') return 'Test History';
       if (pyqSessionInfo.studioTab === 'mistakes') return 'Mistake Bucket';
       if (pyqSessionInfo.studioTab === 'resources') return 'PYQ Importers';
       return 'PYQ Studio';
@@ -697,10 +697,13 @@ export default function App() {
               zenMode={zenMode}
               onToggleZenMode={() => setZenMode((z) => !z)}
               onRequestPdfExport={setPdfModalRequest}
+              onRecordTestHistory={store.recordTestHistoryEntry}
+              onDeleteTestHistory={store.deleteTestHistoryEntry}
               onSessionStateChange={handlePyqSessionStateChange}
               exitSessionTrigger={exitPyqSessionTrigger}
               resetStudioTabTrigger={resetPyqStudioTabTrigger}
-              vaultDrillRequest={vaultDrillRequest}
+              conceptDrillContext={conceptDrillContext}
+              onClearConceptDrill={() => setConceptDrillContext(null)}
             />
           )}
 
@@ -725,6 +728,8 @@ export default function App() {
           {activeView === 'tips' && (
             <TipsVaultView
               allVaultCards={store.allVaultCards}
+              allQuestions={store.allQuestions}
+              attempts={store.state.attempts}
               vaultPacks={store.state.vaultPacks}
               bookmarkedTips={store.state.bookmarkedTips}
               unresolvedMistakesCount={unresolvedMistakesCount}
@@ -746,6 +751,7 @@ export default function App() {
               theme={store.state.theme}
               accentTheme={accentTheme}
               onAddMock={store.addMockTest}
+              onUpdateMock={store.updateMockTest}
               onDeleteMock={store.deleteMockTest}
               onExportMockPdf={handleExportMockReportPdf}
             />

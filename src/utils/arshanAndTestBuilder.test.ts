@@ -49,7 +49,7 @@ function makeMockQuestion(idx: number, overrides: Partial<Question> = {}): Quest
   };
 }
 
-test('Canonical 12->11 subject normalization maps Discrete Math under EM and DB under DBMS', () => {
+test('Canonical 12-subject normalization maps Discrete Math under EM, DB under DBMS, and splits C Programming & DS', () => {
   const dm = normalizeCanonicalSubjectId('DM', 'Graph Theory');
   assert.equal(dm.subjectId, 'em');
   assert.equal(dm.subtopicOverride, 'Discrete Mathematics');
@@ -60,7 +60,8 @@ test('Canonical 12->11 subject normalization maps Discrete Math under EM and DB 
   assert.equal(dmFull.subtopicOverride, 'Discrete Mathematics');
 
   assert.equal(normalizeCanonicalSubjectId('DB').subjectId, 'dbms');
-  assert.equal(normalizeCanonicalSubjectId('C Programming').subjectId, 'pds');
+  assert.equal(normalizeCanonicalSubjectId('C Programming').subjectId, 'cprog');
+  assert.equal(normalizeCanonicalSubjectId('Data Structures').subjectId, 'ds');
   assert.equal(normalizeCanonicalSubjectId('CO & Architecture').subjectId, 'coa');
   assert.equal(normalizeCanonicalSubjectId('ALGO').subjectId, 'algo');
   assert.equal(normalizeCanonicalSubjectId('TOC').subjectId, 'toc');

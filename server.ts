@@ -562,7 +562,7 @@ async function startServer() {
           resolvedUrl: candidateUrl,
           pack: parsed.pack,
           stats: parsed.stats,
-          message: `Synced ${parsed.pack.cardCount} card(s) from ${resolved.displayLabel} (₹0 cost).`,
+          message: `Synced ${parsed.pack.cardCount} card(s) from ${resolved.displayLabel}.`,
         });
         return;
       } catch (err) {
@@ -602,7 +602,7 @@ async function startServer() {
       res.status(200).json({
         ok: false,
         quotaExceeded: false,
-        message: 'Gemini API key is not configured on the server. Use GateOverflow link or Self-Check.',
+        message: 'AI verification is currently unavailable. Enter the official key or use Self-Check.',
       });
       return;
     }
@@ -727,8 +727,8 @@ Return ONLY a valid JSON object (no markdown outside JSON) with this exact schem
       ok: false,
       quotaExceeded: sawQuotaError,
       message: sawQuotaError
-        ? 'Daily free AI limit reached · Use GateOverflow Solution or Self-Check'
-        : 'Could not verify this question automatically right now · Open GateOverflow Solution or use Self-Check.',
+        ? 'Temporarily busy — try again in a moment, or enter the answer key below.'
+        : 'Could not verify this question automatically right now — try again or enter the key below.',
     });
   });
 
@@ -1093,7 +1093,7 @@ ${QUESTION_SCHEMA_INSTRUCTIONS}`;
       res.status(200).json({
         ok: false,
         quotaExceeded: false,
-        message: 'Free-Tier AI key not configured · Using local parser preview.',
+        message: 'AI refinement is unavailable right now — using parsed preview below.',
       });
       return;
     }
@@ -1106,7 +1106,7 @@ Allowed JSON schema (use null for any field not present in the text):
 {
   "name": string (test title without provider prefix if possible, max 140 chars),
   "source": string (e.g. "GO Classes", "Made Easy", "ACE Academy", "GateOverflow", "Testbook", "Zeal", or "GATE Test Series"),
-  "subjectId": "all" | "ga" | "em" | "dl" | "coa" | "pds" | "algo" | "toc" | "cd" | "os" | "dbms" | "cn",
+  "subjectId": "all" | "ga" | "em" | "dl" | "coa" | "cprog" | "ds" | "algo" | "toc" | "cd" | "os" | "dbms" | "cn",
   "type": "Full-Length Mock" | "Subject Test" | "Topic-Wise Test",
   "score": number (net / resultant marks obtained),
   "maxScore": number (total maximum marks, e.g. 25, 50, 100),
@@ -1140,7 +1140,8 @@ Allowed JSON schema (use null for any field not present in the text):
 
 Mapping rules:
 - Discrete Mathematics, Linear Algebra, Calculus, Probability -> subjectId "em"
-- Programming & Data Structures / C / Trees / Linked Lists -> subjectId "pds"
+- C Programming / Pointers / Recursion / Storage Classes -> subjectId "cprog"
+- Data Structures / Trees / Linked Lists / Stacks / Queues / Heaps / Hashing -> subjectId "ds"
 - Full-Length Mock / AIMT / Grand Test -> type "Full-Length Mock", subjectId "all"
 - Topic Wise Test / Mini Test / Chapter Test -> type "Topic-Wise Test"
 - Subject Wise Test / Multi-Subject -> type "Subject Test"
@@ -1191,7 +1192,7 @@ ${cleanedText}
         res.status(200).json({
           ok: false,
           quotaExceeded: false,
-          message: 'Free-Tier AI could not structure this paste · Edit fields manually below.',
+          message: 'Could not structure this summary automatically — edit fields below.',
         });
         return;
       }
@@ -1318,7 +1319,7 @@ ${cleanedText}
       res.status(200).json({
         ok: false,
         quotaExceeded: false,
-        message: 'Could not reach Free-Tier AI right now · Edit preview fields manually.',
+        message: 'Temporarily busy — edit preview fields below.',
       });
     }
   });
@@ -1345,7 +1346,7 @@ ${cleanedText}
       ? req.body.subjects
           .map((s: unknown) => String(s).trim().toLowerCase())
           .filter((s: string): s is SubjectId => VALID_SUBJECT_IDS.includes(s as SubjectId))
-          .slice(0, 11)
+          .slice(0, 12)
       : [];
 
     const weakTopics: string[] = Array.isArray(req.body?.weakTopicsFromMistakeBucket)
@@ -1378,7 +1379,7 @@ ${cleanedText}
         ok: false,
         quotaExceeded: false,
         istDate,
-        message: 'Free-Tier AI key not configured · Showing cached & GateR tag traps.',
+        message: 'Showing curated & mistake-mined vault cards.',
       });
       return;
     }
@@ -1388,7 +1389,7 @@ ${cleanedText}
         ? requestedSubjects
             .map((id) => `${SUBJECT_MAP[id]?.name ?? id} (subjectId: "${id}")`)
             .join(', ')
-        : 'All 11 GATE CSE 2027 subjects (focus on high-weightage OS, DBMS, COA, Algorithms, TOC, CN, EM, DL, PDS, CD, GA)';
+        : 'All 12 GATE CSE 2027 subjects (OS, DBMS, COA, C Programming, Data Structures, Algorithms, TOC, CN, EM, DL, CD, GA)';
 
     const avoidList =
       existingTitlesRaw.length > 0
@@ -1413,7 +1414,7 @@ Generate EXACTLY ${count} distinct, high-rigor GATE CSE cards for: ${subjectCont
 Rules:
 - Every card must expose a REAL GATE CSE pitfall where students lose negative marks (e.g., strict vs non-strict inequalities, 0-indexed vs 1-indexed, byte vs word addressing, MSQ partial traps, boundary conditions, counter-examples).
 - Keep summaries punchy (1 sentence), details mathematically rigorous (2–4 crisp sentences with a concrete counter-example or derivation), and include a compact formula/invariant when applicable.
-- Allowed subjectId values: "ga","em","dl","coa","pds","algo","toc","cd","os","dbms","cn".
+- Allowed subjectId values: "ga","em","dl","coa","cprog","ds","algo","toc","cd","os","dbms","cn".
 - Allowed category values: "Exam Trap", "Formula", "Shortcut", "Edge Case".
 
 Return ONLY valid JSON with this exact schema:
@@ -1529,8 +1530,8 @@ Return ONLY valid JSON with this exact schema:
       quotaExceeded: sawQuotaError,
       istDate,
       message: sawQuotaError
-        ? 'Daily free AI limit reached · Showing cached & GateR tag traps'
-        : 'Could not reach Free-Tier AI right now · Showing cached & GateR tag traps',
+        ? 'Temporarily busy — showing cached vault cards.'
+        : 'Showing cached vault cards right now.',
     });
   });
 
@@ -1561,7 +1562,7 @@ Return ONLY valid JSON with this exact schema:
       res.status(200).json({
         ok: false,
         engine: 'ai',
-        error: 'Free-Tier AI key not configured · Use Fast Local Run (₹0 offline) instead.',
+        error: 'Deep Trace is currently unavailable — use Fast Local Run instead.',
       });
       return;
     }
@@ -1735,8 +1736,8 @@ ${numberedCode}`;
       engine: 'ai',
       quotaExceeded: sawQuotaError,
       error: sawQuotaError
-        ? 'Daily free AI limit reached · Fast Local Run (₹0) is always available.'
-        : 'Deep Trace AI unavailable right now · Use Fast Local Run (₹0).',
+        ? 'Temporarily busy — try again in a moment, or use Fast Local Run.'
+        : 'Deep Trace is temporarily unavailable — use Fast Local Run.',
     });
   });
 
@@ -1774,7 +1775,7 @@ ${numberedCode}`;
     if (!ai) {
       res.status(200).json({
         ok: false,
-        error: 'Free-Tier AI key not configured · Explore the 28 curated GATE languages below offline (₹0).',
+        error: 'Custom classifier is currently unavailable — explore the 28 curated GATE languages below.',
       });
       return;
     }

@@ -23,7 +23,8 @@ function makeMockQuestionBank(): Question[] {
     'em',
     'dl',
     'coa',
-    'pds',
+    'cprog',
+    'ds',
     'algo',
     'toc',
     'cd',
@@ -121,12 +122,12 @@ describe('dailyTestEngine', () => {
   });
 
   it('never repeats DPP questions across consecutive IST days until the pool is exhausted', () => {
-    const bank = makeMockQuestionBank(); // 39 valid core CS questions
+    const bank = makeMockQuestionBank(); // 43 valid core CS questions across 11 core subjects
     let dailyProgress = createEmptyDailyProgress();
     const seenAcrossDays = new Set<string>();
 
-    // Days 1, 2, 3 => 30 unique questions with zero overlap
-    const dates = ['2026-11-26', '2026-11-27', '2026-11-28'];
+    // Days 1..4 => 40 unique questions with zero overlap
+    const dates = ['2026-11-26', '2026-11-27', '2026-11-28', '2026-11-29'];
     for (const date of dates) {
       const picked = selectOrGetDailyDpp({
         todayIst: date,
@@ -159,12 +160,12 @@ describe('dailyTestEngine', () => {
       assert.equal(dailyProgress.dailyDppByDate[date]?.completed, true);
     }
 
-    assert.equal(seenAcrossDays.size, 30);
-    assert.equal(dailyProgress.usedDailyDppIds.length, 30);
+    assert.equal(seenAcrossDays.size, 40);
+    assert.equal(dailyProgress.usedDailyDppIds.length, 40);
 
-    // Day 4 has only 9 unseen remaining -> takes all 9 unseen + rolls over cleanly for 10th without intra-day duplicates
-    const day4 = selectOrGetDailyDpp({
-      todayIst: '2026-11-29',
+    // Day 5 has only 3 unseen remaining -> takes all 3 unseen + rolls over cleanly without intra-day duplicates
+    const day5 = selectOrGetDailyDpp({
+      todayIst: '2026-11-30',
       allQuestions: bank,
       dailyProgress,
       syllabus: GATE_2027_SYLLABUS,
@@ -172,9 +173,9 @@ describe('dailyTestEngine', () => {
       attempts: {},
       hideRemoved2027: true,
     });
-    assert.equal(day4.questions.length, 10);
-    assert.equal(day4.rolledOverPool, true);
-    assert.equal(new Set(day4.record.questionIds).size, 10);
+    assert.equal(day5.questions.length, 10);
+    assert.equal(day5.rolledOverPool, true);
+    assert.equal(new Set(day5.record.questionIds).size, 10);
   });
 
   it('selects 5 unseen Daily GA questions with never-repeating guarantee and completion tracking', () => {

@@ -183,7 +183,7 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
                     </p>
                     <p className="text-[11px] text-[#2E5E3E] dark:text-[#63A87A] flex items-center gap-1 font-medium">
                       <CheckCircle2 className="w-3 h-3 shrink-0" />
-                      {syncStatus === 'synced' ? 'Firestore Synced' : 'Connecting...'}
+                      {syncStatus === 'synced' ? 'Cloud Synced' : 'Connecting...'}
                     </p>
                   </div>
                 </div>
@@ -293,7 +293,7 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
             <div className="rounded-[22px] bg-white dark:bg-[#1C1714] border border-[#E8E0D5] dark:border-[#2E2520] p-1.5 space-y-0.5">
               {[
                 { id: 'dashboard' as const, label: 'Overview', icon: LayoutDashboard, core: true },
-                { id: 'syllabus' as const, label: 'Subjects (11)', icon: BookOpen, core: true },
+                { id: 'syllabus' as const, label: 'Subjects (12)', icon: BookOpen, core: true },
                 { id: 'pyq' as const, label: 'PYQ Studio', icon: Code2, core: true },
                 {
                   id: 'focus' as const,

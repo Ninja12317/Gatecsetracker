@@ -107,7 +107,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   const syncTitle =
     syncStatus === 'synced'
-      ? 'Firestore cloud synced'
+      ? 'Cloud synced'
       : syncStatus === 'connecting'
       ? 'Syncing workspace...'
       : syncStatus === 'error'

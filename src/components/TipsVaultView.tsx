@@ -28,6 +28,8 @@ import {
 } from 'lucide-react';
 import type {
   GateSubject,
+  Question,
+  QuestionAttemptRecord,
   SubjectId,
   VaultCard,
   VaultKind,
@@ -41,12 +43,18 @@ import {
   isRemovedInGate2027,
   parseAndCategorizeBulkJson,
 } from '../utils/vaultImporter';
+import {
+  findMatchingPyqsForVaultCard,
+  type VaultPyqMatchResult,
+} from '../utils/vaultMatcher';
 import { downloadVaultCheatSheetPdf } from '../utils/pdfExporter';
 import { CodeBlock } from './CodeBlock';
 import { FormulaBlock, MathText } from './MathText';
 
 interface TipsVaultViewProps {
   allVaultCards: VaultCard[];
+  allQuestions: Question[];
+  attempts?: Record<string, QuestionAttemptRecord>;
   vaultPacks: VaultPack[];
   bookmarkedTips: string[];
   unresolvedMistakesCount: number;
@@ -61,7 +69,7 @@ interface TipsVaultViewProps {
     url: string,
     packName?: string
   ) => Promise<{ ok: boolean; addedCards: number; duplicatesSkipped?: number; message: string }>;
-  onDrillMatchingPyqs?: (card: VaultCard) => void;
+  onDrillMatchingPyqs?: (card: VaultCard, matchResult: VaultPyqMatchResult) => void;
   onNotify?: (msg: string) => void;
 }
 
@@ -137,6 +145,8 @@ const PAGE_BATCH_SIZE = 36;
 
 export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
   allVaultCards,
+  allQuestions,
+  attempts,
   vaultPacks,
   bookmarkedTips,
   unresolvedMistakesCount,
@@ -285,6 +295,20 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
     [filteredCards, visibleLimit]
   );
 
+  // Precompute weighted concept PYQ matches for the spotlight + currently displayed cards
+  const spotlightMatch = useMemo<VaultPyqMatchResult | null>(() => {
+    if (!spotlightCard) return null;
+    return findMatchingPyqsForVaultCard(spotlightCard, allQuestions, attempts, 15);
+  }, [spotlightCard, allQuestions, attempts]);
+
+  const displayedMatchesMap = useMemo(() => {
+    const map = new Map<string, VaultPyqMatchResult>();
+    for (const card of displayedCards) {
+      map.set(card.id, findMatchingPyqsForVaultCard(card, allQuestions, attempts, 15));
+    }
+    return map;
+  }, [displayedCards, allQuestions, attempts]);
+
   // Live Dry-Run Preview for Bulk JSON Importer
   const bulkDryRun = useMemo(() => {
     if (!bulkJsonText.trim()) return null;
@@ -354,7 +378,7 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
     setExportingPdf(true);
     const subjLabel =
       subjectFilter === 'all'
-        ? 'All 11 GATE CSE 2027 Subjects'
+        ? 'All 12 GATE CSE 2027 Subjects'
         : SUBJECT_MAP[subjectFilter]?.name ?? subjectFilter.toUpperCase();
     const kindLabel =
       kindFilter === 'ALL'
@@ -440,10 +464,10 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#FDF6E3] dark:bg-[#2C2215] text-[#8B6209] dark:text-[#E0A92E] border border-[#EED89A] dark:border-[#5C441B]">
                 <Sparkles className="h-3 w-3" />
-                100% Offline Master Bundle · Zero API Errors
+                Formula &amp; Trap Vault · {allVaultCards.length} Cards
               </span>
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-[#F4EFE6] dark:bg-[#241D19] text-[#6E261A] dark:text-[#E5B29E] border border-[#E8E0D5] dark:border-[#352B25]">
-                {allVaultCards.length} Cards
+                12 Subjects
               </span>
               {vaultPacks.length > 0 && (
                 <button
@@ -461,7 +485,7 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
               <span className="text-[#6E261A] dark:text-[#E0A92E]">Formula Vault</span>
             </h1>
             <p className="mt-1 text-xs sm:text-sm text-[#61554D] dark:text-[#A99B8E]">
-              IIT Madras GATE CSE 2027 offline formula bank, bulk JSON auto-categorizer (50–500+ cards), zero-cost GitHub sync, Active-Recall mode &amp; A4 Cheat Sheet PDF export.
+              IIT Madras GATE CSE 2027 formula &amp; trap reference, bulk JSON auto-categorizer, GitHub sync, Active-Recall mode &amp; A4 Cheat Sheet PDF export.
             </p>
           </div>
 
@@ -490,7 +514,7 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
               className="shrink-0 whitespace-nowrap h-10 px-3.5 rounded-full border border-[#E8E0D5] dark:border-[#352B25] bg-[#FAF8F4] dark:bg-[#241D19] hover:border-[#C89216] text-[#1C1613] dark:text-[#F5F0E8] text-xs font-semibold inline-flex items-center gap-1.5 press-tactile"
             >
               <Github className="h-3.5 w-3.5 text-[#6E261A] dark:text-[#E0A92E]" />
-              GitHub Sync (₹0)
+              GitHub Sync
             </button>
 
             <button
@@ -539,7 +563,7 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#382B24]">
             <div className="flex flex-wrap items-center gap-2 min-w-0">
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[#C89216]/20 text-[#E5B23A] border border-[#C89216]/40 whitespace-nowrap shrink-0">
-                Daily Spotlight · Offline
+                Daily Briefing
               </span>
               <span className="text-xs font-mono font-semibold text-[#D8CBB8] truncate">
                 {SUBJECT_MAP[spotlightCard.subject]?.code ?? spotlightCard.subject.toUpperCase()} ·{' '}
@@ -594,13 +618,16 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
               {spotlightCard.formulaLatex && (
                 <FormulaLatexBlock latex={spotlightCard.formulaLatex} compact darkSurface />
               )}
-              {onDrillMatchingPyqs && (
+              {onDrillMatchingPyqs && spotlightMatch && spotlightMatch.questions.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => onDrillMatchingPyqs(spotlightCard)}
+                  data-testid="vault-spotlight-drill-btn"
+                  onClick={() => onDrillMatchingPyqs(spotlightCard, spotlightMatch)}
                   className="h-9 px-3.5 rounded-full bg-[#C89216] hover:bg-[#B18012] text-[#1C1613] text-xs font-bold inline-flex items-center justify-center gap-1.5 press-tactile"
                 >
-                  Drill Matching GateR PYQs
+                  {spotlightMatch.usedSubjectFallback
+                    ? `Practice ${SUBJECT_MAP[spotlightCard.subject]?.code ?? ''} PYQs (${spotlightMatch.questions.length})`
+                    : `Practice ${spotlightMatch.strictMatchCount} Matching PYQ${spotlightMatch.strictMatchCount === 1 ? '' : 's'}`}
                   <ArrowUpRight className="h-3.5 w-3.5" />
                 </button>
               )}
@@ -968,7 +995,7 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
                   )}
                 </div>
 
-                {/* Card Footer: Source Pill + Drill Matching GateR PYQs */}
+                {/* Card Footer: Source Pill + Practice Matching PYQs */}
                 <div className="pt-2.5 border-t border-[#EFE8DC] dark:border-[#2A221D] flex flex-wrap items-center justify-between gap-2">
                   <span
                     className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border ${SOURCE_BADGE_STYLE[card.source]}`}
@@ -976,17 +1003,24 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
                     {card.source}
                   </span>
 
-                  {onDrillMatchingPyqs && !card.outOf2027Syllabus && (
-                    <button
-                      type="button"
-                      data-testid="vault-drill-pyq-btn"
-                      onClick={() => onDrillMatchingPyqs(card)}
-                      className="h-7 px-3 rounded-full bg-[#F4EFE6] dark:bg-[#241D19] hover:bg-[#6E261A] hover:text-white dark:hover:bg-[#E0A92E] dark:hover:text-[#1C1613] text-[#6E261A] dark:text-[#E0A92E] text-[11px] font-semibold inline-flex items-center gap-1 transition-colors press-tactile"
-                    >
-                      Drill Matching PYQs
-                      <ArrowUpRight className="h-3 w-3" />
-                    </button>
-                  )}
+                  {onDrillMatchingPyqs && !card.outOf2027Syllabus && (() => {
+                    const cardMatch = displayedMatchesMap.get(card.id);
+                    if (!cardMatch || cardMatch.questions.length === 0) return null;
+                    const label = cardMatch.usedSubjectFallback
+                      ? `Practice ${subj?.code ?? card.subject.toUpperCase()} PYQs (${cardMatch.questions.length})`
+                      : `Practice ${cardMatch.strictMatchCount} Matching PYQ${cardMatch.strictMatchCount === 1 ? '' : 's'}`;
+                    return (
+                      <button
+                        type="button"
+                        data-testid="vault-drill-pyq-btn"
+                        onClick={() => onDrillMatchingPyqs(card, cardMatch)}
+                        className="h-7 px-3 rounded-full bg-[#F4EFE6] dark:bg-[#241D19] hover:bg-[#6E261A] hover:text-white dark:hover:bg-[#E0A92E] dark:hover:text-[#1C1613] text-[#6E261A] dark:text-[#E0A92E] text-[11px] font-semibold inline-flex items-center gap-1 transition-colors press-tactile"
+                      >
+                        {label}
+                        <ArrowUpRight className="h-3 w-3" />
+                      </button>
+                    );
+                  })()}
                 </div>
               </article>
             );
@@ -1215,10 +1249,10 @@ export const TipsVaultView: React.FC<TipsVaultViewProps> = ({
                   id="github-sync-title"
                   className="font-display text-lg font-bold text-[#1C1613] dark:text-[#F5F0E8]"
                 >
-                  GitHub Repo Bundle Sync (₹0 AI Cost)
+                  GitHub Bundle Sync
                 </h2>
                 <p className="mt-0.5 text-xs text-[#61554D] dark:text-[#A99B8E]">
-                  Paste any public GitHub repo (`github.com/user/repo`) or raw `.json` file URL. Server proxy fetches &amp; auto-categorizes cards with zero Gemini quota usage.
+                  Paste any public GitHub repo (`github.com/user/repo`) or raw `.json` file URL to import and auto-categorize study cards.
                 </p>
               </div>
               <button

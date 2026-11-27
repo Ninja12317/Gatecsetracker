@@ -167,7 +167,7 @@
         },
         "subjectId": {
           "type": "string",
-          "enum": ["ga", "em", "dl", "coa", "pds", "algo", "toc", "cd", "os", "dbms", "cn"]
+          "enum": ["ga", "em", "dl", "coa", "cprog", "ds", "algo", "toc", "cd", "os", "dbms", "cn"]
         },
         "minutes": {
           "type": "number"
@@ -339,7 +339,7 @@
         },
         "subjectId": {
           "type": "string",
-          "enum": ["all", "ga", "em", "dl", "coa", "pds", "algo", "toc", "cd", "os", "dbms", "cn"]
+          "enum": ["all", "ga", "em", "dl", "coa", "cprog", "ds", "algo", "toc", "cd", "os", "dbms", "cn"]
         },
         "date": {
           "type": "string",
@@ -410,6 +410,10 @@
         "createdAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
         }
       },
       "required": ["ownerId", "name", "source", "date", "type", "score", "maxScore", "accuracy", "unattempted", "notes", "createdAt"]
@@ -426,7 +430,7 @@
         },
         "subjectId": {
           "type": "string",
-          "enum": ["ga", "em", "dl", "coa", "pds", "algo", "toc", "cd", "os", "dbms", "cn"]
+          "enum": ["ga", "em", "dl", "coa", "cprog", "ds", "algo", "toc", "cd", "os", "dbms", "cn"]
         },
         "title": {
           "type": "string",
@@ -471,7 +475,7 @@
         },
         "subjectId": {
           "type": "string",
-          "enum": ["ga", "em", "dl", "coa", "pds", "algo", "toc", "cd", "os", "dbms", "cn"]
+          "enum": ["ga", "em", "dl", "coa", "cprog", "ds", "algo", "toc", "cd", "os", "dbms", "cn"]
         },
         "subtopic": {
           "type": "string",
@@ -642,7 +646,7 @@
         },
         "subjectId": {
           "type": "string",
-          "enum": ["ga", "em", "dl", "coa", "pds", "algo", "toc", "cd", "os", "dbms", "cn"]
+          "enum": ["ga", "em", "dl", "coa", "cprog", "ds", "algo", "toc", "cd", "os", "dbms", "cn"]
         },
         "title": {
           "type": "string",
@@ -905,6 +909,74 @@
         }
       },
       "required": ["ownerId", "activeSheetId", "sheets", "updatedAt"]
+    },
+    "TestHistory": {
+      "title": "TestHistory",
+      "description": "Completed PYQ/DPP/Concept Drill test session with strict graded vs pending-key scoring and live recalculation support.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "testId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 180
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["timed", "practice", "daily_dpp", "daily_ga", "concept_drill"]
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 16,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "completedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "durationSeconds": { "type": "number" },
+        "questionIds": {
+          "type": "array",
+          "description": "Bounded list of up to 200 question IDs in the test."
+        },
+        "responses": {
+          "type": "object",
+          "description": "Map of questionId -> serialized response string."
+        },
+        "gradedMarks": { "type": "number" },
+        "gradedMaxMarks": { "type": "number" },
+        "totalMaxMarks": { "type": "number" },
+        "gradedCount": { "type": "number" },
+        "gradedAttemptedCount": { "type": "number" },
+        "pendingKeyCount": { "type": "number" },
+        "correctCount": { "type": "number" },
+        "wrongCount": { "type": "number" },
+        "unattemptedCount": { "type": "number" },
+        "penaltyMarks": { "type": "number" },
+        "accuracyPct": { "type": "number" },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId", "testId", "title", "mode", "date", "completedAt", "durationSeconds",
+        "questionIds", "responses", "gradedMarks", "gradedMaxMarks", "totalMaxMarks",
+        "gradedCount", "gradedAttemptedCount", "pendingKeyCount", "correctCount",
+        "wrongCount", "unattemptedCount", "penaltyMarks", "accuracyPct", "createdAt", "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -979,6 +1051,10 @@
     "/users/{userId}/rough_work/{docId}": {
       "schema": { "$ref": "#/entities/StandaloneRoughWork" },
       "description": "Standalone general rough-work sketchpad sheets isolated from PYQ Studio sketches."
+    },
+    "/users/{userId}/test_history/{testId}": {
+      "schema": { "$ref": "#/entities/TestHistory" },
+      "description": "Submitted PYQ/DPP/Concept Drill test logs with strict graded vs pending-key scoring."
     }
   }
 }

@@ -16,7 +16,8 @@ export type SubjectId =
   | 'em'
   | 'dl'
   | 'coa'
-  | 'pds'
+  | 'cprog'
+  | 'ds'
   | 'algo'
   | 'toc'
   | 'cd'
@@ -158,6 +159,8 @@ export interface MistakeEntry {
   userNote?: string;
 }
 
+export type QuestionGradeStatus = 'correct' | 'wrong' | 'unattempted' | 'pending_key';
+
 export interface QuestionAttemptRecord {
   questionId: string;
   isCorrect: boolean;
@@ -165,6 +168,28 @@ export interface QuestionAttemptRecord {
   maxMarks: number;
   attemptedAt: string;
   selectedAnswer?: string;
+}
+
+export interface TestHistoryEntry {
+  id: string;
+  title: string;
+  mode: 'timed' | 'practice' | 'daily_dpp' | 'daily_ga' | 'concept_drill';
+  date: string; // YYYY-MM-DD
+  completedAt: string; // ISO
+  durationSeconds: number;
+  questionIds: string[];
+  responses: Record<string, string>; // serialized answer per questionId (e.g. 'B', 'A,C', '42')
+  gradedMarks: number;
+  gradedMaxMarks: number;
+  totalMaxMarks: number;
+  gradedCount: number;
+  gradedAttemptedCount: number;
+  pendingKeyCount: number;
+  correctCount: number;
+  wrongCount: number;
+  unattemptedCount: number;
+  penaltyMarks: number;
+  accuracyPct: number;
 }
 
 export type TrapSourceType =
@@ -335,6 +360,8 @@ export interface DailyTestRecord {
   completed: boolean;
   score: number;
   maxMarks: number;
+  gradedMaxMarks?: number;
+  pendingKeyCount?: number;
   accuracy: number;
   attemptedCount: number;
   correctCount: number;
@@ -504,4 +531,5 @@ export interface WarRoomState {
   vaultPacks: VaultPack[];
   srsCards: Record<string, SrsCardRecord>;
   mocks: MockTestEntry[];
+  testHistory: TestHistoryEntry[];
 }

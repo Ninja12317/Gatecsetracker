@@ -37,6 +37,7 @@ import type {
   SubjectId,
   SubtopicProgress,
   SyncStatus,
+  TestHistoryEntry,
   ThemeMode,
   TipItem,
   TopicStatus,
@@ -103,6 +104,22 @@ import {
   selectOrGetDailyDpp,
   selectOrGetDailyGa,
 } from '../utils/dailyTestEngine';
+import {
+  migrateLegacyMockSubject,
+  migrateLegacyProgressMap,
+  migrateLegacyQuestion,
+  migrateLegacyQuestionList,
+  migrateLegacyTip,
+  migrateLegacyVaultCard,
+  migrateLegacyWarRoomState,
+  normalizeSubject12,
+} from '../utils/subjectMigration';
+import {
+  evaluateQuestionStrict,
+  gradeTestSessionStrict,
+  parseSerializedResponse,
+  recalculateTestHistoryEntry,
+} from '../utils/testScoringEngine';
 
 const STORAGE_KEY = 'gate27_war_room_state_v2';
 const STANDALONE_ROUGH_WORK_KEY = 'standalone_rough_work';
@@ -186,7 +203,7 @@ function loadLocalState(): WarRoomState {
       localAccent.accentUpdatedAt,
       parseAccentUpdatedAt(parsed.settings?.accentUpdatedAt)
     );
-    return {
+    const assembled: WarRoomState = {
       ...initial,
       ...parsed,
       theme: resolvedTheme,
@@ -228,7 +245,9 @@ function loadLocalState(): WarRoomState {
       srsCards: parsed.srsCards ?? {},
       mocks: parsed.mocks ?? [],
       studyLogs: parsed.studyLogs ?? [],
+      testHistory: Array.isArray(parsed.testHistory) ? parsed.testHistory : [],
     };
+    return migrateLegacyWarRoomState(assembled);
   } catch {
     const initial = createInitialWarRoomState();
     return {
@@ -369,7 +388,7 @@ export function useWarRoomStore() {
     }> => {
       setGaterSyncStatus('syncing');
       setGaterError('');
-      setSyncProgressMsg('Syncing GateR & Arshan GitHub banks into IndexedDB...');
+      setSyncProgressMsg('Syncing GATE CSE question banks...');
 
       try {
         const qs = forceRefresh ? '?force=1' : '';
@@ -444,11 +463,12 @@ export function useWarRoomStore() {
           };
         }
 
-        const { questions: mergedQuestions, stats } = mergeQuestionBanks(
+        const { questions: rawMergedQuestions, stats } = mergeQuestionBanks(
           gaterNormalized,
           arshanQuestions,
           arshanKeys
         );
+        const mergedQuestions = migrateLegacyQuestionList(rawMergedQuestions);
 
         const syncedAt = new Date().toISOString();
         setGaterQuestions(mergedQuestions);
@@ -470,7 +490,7 @@ export function useWarRoomStore() {
           questions: mergedQuestions,
         });
 
-        const msg = `Synced ${mergedQuestions.length.toLocaleString()} Qs (${stats.gaterCount.toLocaleString()} GateR + ${stats.predicted2027Count} Predicted '27 + ${stats.enrichedCount} enriched keys · ${stats.verifiedCount} verified).`;
+        const msg = `Synced ${mergedQuestions.length.toLocaleString()} questions (${stats.verifiedCount.toLocaleString()} with verified answer keys).`;
         setSyncProgressMsg(msg);
         return {
           ok: true,
@@ -509,8 +529,9 @@ export function useWarRoomStore() {
       const cached = await readGateRCache();
       if (cancelled) return;
       if (cached && cached.questions.length > 0) {
-        setGaterQuestions(cached.questions);
-        setGaterRawCount(cached.gaterCount ?? cached.questions.length);
+        const migrated = migrateLegacyQuestionList(cached.questions);
+        setGaterQuestions(migrated);
+        setGaterRawCount(cached.gaterCount ?? migrated.length);
         setArshanCount(cached.arshanCount ?? 0);
         setEnrichedCount(cached.enrichedCount ?? 0);
         setGaterSyncedAt(cached.syncedAt);
@@ -1015,16 +1036,20 @@ export function useWarRoomStore() {
           onSnapshot(
             query(collection(db, 'users', uid, 'syllabus'), where('ownerId', '==', uid)),
             (snap) => {
-              const baseProgress = createInitialWarRoomState().progress;
+              const rawProgress: Record<string, SubtopicProgress> = {};
               snap.forEach((docSnap) => {
                 const d = docSnap.data();
-                baseProgress[docSnap.id] = {
+                rawProgress[docSnap.id] = {
                   status: d.status as TopicStatus,
                   confidence: Number(d.confidence ?? 1),
                   lastRevisedAt: d.lastRevisedAt ? String(d.lastRevisedAt) : null,
                   notes: String(d.notes ?? ''),
                 };
               });
+              const baseProgress = {
+                ...createInitialWarRoomState().progress,
+                ...migrateLegacyProgressMap(rawProgress),
+              };
               setState((prev) => ({ ...prev, progress: baseProgress }));
             },
             (err) => handleFirestoreError(err, OperationType.LIST, `users/${uid}/syllabus`)
@@ -1048,7 +1073,9 @@ export function useWarRoomStore() {
                 logs.push({
                   id: docSnap.id,
                   date: String(d.date),
-                  subjectId: d.subjectId as SubjectId,
+                  subjectId: normalizeSubject12(String(d.subjectId ?? ''), {
+                    text: `${String(d.goal ?? '')} ${String(d.resumeNote ?? '')}`,
+                  }),
                   minutes: Number(d.minutes),
                   mode: d.mode === 'stopwatch' ? 'stopwatch' : 'pomodoro',
                   completedAt: String(d.completedAt),
@@ -1153,7 +1180,7 @@ export function useWarRoomStore() {
                   source: String(d.source),
                   subjectId:
                     typeof d.subjectId === 'string'
-                      ? (d.subjectId as MockTestEntry['subjectId'])
+                      ? migrateLegacyMockSubject(d.subjectId, String(d.name ?? ''), String(d.notes ?? ''))
                       : undefined,
                   date: String(d.date),
                   type: parsedType,
@@ -1209,17 +1236,19 @@ export function useWarRoomStore() {
               const tips: TipItem[] = [];
               snap.forEach((docSnap) => {
                 const d = docSnap.data();
-                tips.push({
-                  id: docSnap.id,
-                  subjectId: d.subjectId as SubjectId,
-                  title: String(d.title),
-                  category: d.category as TipItem['category'],
-                  summary: String(d.summary ?? ''),
-                  detail: String(d.detail),
-                  formula: d.formula ? String(d.formula) : undefined,
-                  sourceUrl: d.sourceUrl ? String(d.sourceUrl) : undefined,
-                  isCustom: true,
-                });
+                tips.push(
+                  migrateLegacyTip({
+                    id: docSnap.id,
+                    subjectId: d.subjectId as SubjectId,
+                    title: String(d.title),
+                    category: d.category as TipItem['category'],
+                    summary: String(d.summary ?? ''),
+                    detail: String(d.detail),
+                    formula: d.formula ? String(d.formula) : undefined,
+                    sourceUrl: d.sourceUrl ? String(d.sourceUrl) : undefined,
+                    isCustom: true,
+                  })
+                );
               });
               setState((prev) => ({ ...prev, customTips: tips }));
             },
@@ -1234,32 +1263,34 @@ export function useWarRoomStore() {
               const qs: Question[] = [];
               snap.forEach((docSnap) => {
                 const d = docSnap.data();
-                qs.push({
-                  id: docSnap.id,
-                  subjectId: d.subjectId as SubjectId,
-                  subtopic: String(d.subtopic),
-                  format: d.format as Question['format'],
-                  marks: d.marks === 1 ? 1 : 2,
-                  difficulty: d.difficulty as Question['difficulty'],
-                  sourceTag: String(d.sourceTag),
-                  sourceUrl: d.sourceUrl ? String(d.sourceUrl) : undefined,
-                  prompt: String(d.prompt),
-                  codeSnippet: d.codeSnippet ? String(d.codeSnippet) : undefined,
-                  options:
-                    Array.isArray(d.options) && d.options.length > 0 ? d.options : undefined,
-                  correctOption: d.correctOption ? String(d.correctOption) : undefined,
-                  correctOptions:
-                    Array.isArray(d.correctOptions) && d.correctOptions.length > 0
-                      ? d.correctOptions
-                      : undefined,
-                  natAnswer: d.format === 'NAT' ? Number(d.natAnswer ?? 0) : undefined,
-                  natTolerance: d.format === 'NAT' ? Number(d.natTolerance ?? 0.01) : undefined,
-                  natUnit: d.natUnit ? String(d.natUnit) : undefined,
-                  explanation: String(d.explanation),
-                  wrongOptionAnalysis: String(d.wrongOptionAnalysis ?? ''),
-                  fingerprint: d.fingerprint ? String(d.fingerprint) : undefined,
-                  isCustom: true,
-                });
+                qs.push(
+                  migrateLegacyQuestion({
+                    id: docSnap.id,
+                    subjectId: d.subjectId as SubjectId,
+                    subtopic: String(d.subtopic),
+                    format: d.format as Question['format'],
+                    marks: d.marks === 1 ? 1 : 2,
+                    difficulty: d.difficulty as Question['difficulty'],
+                    sourceTag: String(d.sourceTag),
+                    sourceUrl: d.sourceUrl ? String(d.sourceUrl) : undefined,
+                    prompt: String(d.prompt),
+                    codeSnippet: d.codeSnippet ? String(d.codeSnippet) : undefined,
+                    options:
+                      Array.isArray(d.options) && d.options.length > 0 ? d.options : undefined,
+                    correctOption: d.correctOption ? String(d.correctOption) : undefined,
+                    correctOptions:
+                      Array.isArray(d.correctOptions) && d.correctOptions.length > 0
+                        ? d.correctOptions
+                        : undefined,
+                    natAnswer: d.format === 'NAT' ? Number(d.natAnswer ?? 0) : undefined,
+                    natTolerance: d.format === 'NAT' ? Number(d.natTolerance ?? 0.01) : undefined,
+                    natUnit: d.natUnit ? String(d.natUnit) : undefined,
+                    explanation: String(d.explanation),
+                    wrongOptionAnalysis: String(d.wrongOptionAnalysis ?? ''),
+                    fingerprint: d.fingerprint ? String(d.fingerprint) : undefined,
+                    isCustom: true,
+                  })
+                );
               });
               setState((prev) => ({ ...prev, customQuestions: qs }));
             },
@@ -1302,19 +1333,21 @@ export function useWarRoomStore() {
               const traps: TipItem[] = [];
               snap.forEach((docSnap) => {
                 const d = docSnap.data();
-                traps.push({
-                  id: docSnap.id,
-                  subjectId: d.subjectId as SubjectId,
-                  title: String(d.title),
-                  category: d.category as TipItem['category'],
-                  summary: String(d.summary ?? ''),
-                  detail: String(d.detail ?? ''),
-                  formula: d.formula ? String(d.formula) : undefined,
-                  trapSource: (d.trapSource as TrapSourceType) || 'ai_daily',
-                  generatedDateIst: d.generatedDateIst ? String(d.generatedDateIst) : undefined,
-                  sourceQuestionId: d.sourceQuestionId ? String(d.sourceQuestionId) : undefined,
-                  isCustom: true,
-                });
+                traps.push(
+                  migrateLegacyTip({
+                    id: docSnap.id,
+                    subjectId: d.subjectId as SubjectId,
+                    title: String(d.title),
+                    category: d.category as TipItem['category'],
+                    summary: String(d.summary ?? ''),
+                    detail: String(d.detail ?? ''),
+                    formula: d.formula ? String(d.formula) : undefined,
+                    trapSource: (d.trapSource as TrapSourceType) || 'ai_daily',
+                    generatedDateIst: d.generatedDateIst ? String(d.generatedDateIst) : undefined,
+                    sourceQuestionId: d.sourceQuestionId ? String(d.sourceQuestionId) : undefined,
+                    isCustom: true,
+                  })
+                );
               });
               traps.sort((a, b) => (b.generatedDateIst ?? '').localeCompare(a.generatedDateIst ?? ''));
               setState((prev) => ({ ...prev, trapsVault: traps }));
@@ -1418,7 +1451,9 @@ export function useWarRoomStore() {
               const packs: VaultPack[] = [];
               snap.forEach((docSnap) => {
                 const d = docSnap.data();
-                const rawCards = Array.isArray(d.cards) ? (d.cards as VaultCard[]) : [];
+                const rawCards = Array.isArray(d.cards)
+                  ? (d.cards as VaultCard[]).map(migrateLegacyVaultCard)
+                  : [];
                 if (rawCards.length === 0) return;
                 const createdMs =
                   typeof d.createdAt?.toMillis === 'function' ? d.createdAt.toMillis() : Date.now();
@@ -1507,6 +1542,60 @@ export function useWarRoomStore() {
               });
             },
             (err) => handleFirestoreError(err, OperationType.GET, `users/${uid}/rough_work/main`)
+          )
+        );
+
+        unsubscribes.push(
+          onSnapshot(
+            query(collection(db, 'users', uid, 'test_history'), where('ownerId', '==', uid)),
+            (snap) => {
+              const entries: TestHistoryEntry[] = [];
+              snap.forEach((docSnap) => {
+                const d = docSnap.data();
+                const responsesObj: Record<string, string> = {};
+                if (d.responses && typeof d.responses === 'object') {
+                  for (const [k, v] of Object.entries(d.responses as Record<string, unknown>)) {
+                    if (typeof v === 'string') responsesObj[k] = v;
+                  }
+                }
+                const completedAtStr = String(d.completedAt ?? new Date().toISOString());
+                const dateStr =
+                  typeof d.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.date)
+                    ? d.date
+                    : completedAtStr.slice(0, 10);
+                entries.push({
+                  id: String(d.testId ?? d.id ?? docSnap.id),
+                  title: String(d.title ?? 'PYQ Practice Test'),
+                  mode:
+                    d.mode === 'daily_dpp' ||
+                    d.mode === 'daily_ga' ||
+                    d.mode === 'concept_drill' ||
+                    d.mode === 'timed' ||
+                    d.mode === 'practice'
+                      ? d.mode
+                      : 'practice',
+                  date: dateStr,
+                  completedAt: completedAtStr,
+                  durationSeconds: Number(d.durationSeconds ?? 0),
+                  questionIds: Array.isArray(d.questionIds) ? d.questionIds.map(String) : [],
+                  responses: responsesObj,
+                  gradedMarks: Number(d.gradedMarks ?? d.score ?? 0),
+                  gradedMaxMarks: Number(d.gradedMaxMarks ?? 0),
+                  totalMaxMarks: Number(d.totalMaxMarks ?? 0),
+                  gradedCount: Number(d.gradedCount ?? 0),
+                  gradedAttemptedCount: Number(d.gradedAttemptedCount ?? d.attemptedCount ?? 0),
+                  pendingKeyCount: Number(d.pendingKeyCount ?? 0),
+                  correctCount: Number(d.correctCount ?? 0),
+                  wrongCount: Number(d.wrongCount ?? 0),
+                  unattemptedCount: Number(d.unattemptedCount ?? 0),
+                  penaltyMarks: Number(d.penaltyMarks ?? 0),
+                  accuracyPct: Number(d.accuracyPct ?? d.accuracy ?? 0),
+                });
+              });
+              entries.sort((a, b) => b.completedAt.localeCompare(a.completedAt));
+              setState((prev) => ({ ...prev, testHistory: entries }));
+            },
+            (err) => handleFirestoreError(err, OperationType.LIST, `users/${uid}/test_history`)
           )
         );
       } catch (err) {
@@ -2087,6 +2176,105 @@ export function useWarRoomStore() {
     [writeMistakeEntry]
   );
 
+  const recordTestHistoryEntry = useCallback((entry: TestHistoryEntry) => {
+    const docId = sanitizeDocId(entry.id);
+    const cleanResponses: Record<string, string> = {};
+    for (const [qId, val] of Object.entries(entry.responses ?? {})) {
+      if (typeof val === 'string' && val.trim() !== '') {
+        cleanResponses[qId] = val.slice(0, 120);
+      }
+    }
+    const completedAtClean = (entry.completedAt || new Date().toISOString()).slice(0, 40);
+    const dateClean =
+      typeof entry.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(entry.date)
+        ? entry.date
+        : completedAtClean.slice(0, 10);
+    const cleanEntry: TestHistoryEntry = {
+      id: docId,
+      title: (entry.title || 'PYQ Practice Test').slice(0, 180),
+      mode:
+        entry.mode === 'timed' ||
+        entry.mode === 'practice' ||
+        entry.mode === 'daily_dpp' ||
+        entry.mode === 'daily_ga' ||
+        entry.mode === 'concept_drill'
+          ? entry.mode
+          : 'practice',
+      date: dateClean,
+      completedAt: completedAtClean,
+      durationSeconds: Math.max(0, Math.min(86400, Math.round(entry.durationSeconds || 0))),
+      questionIds: entry.questionIds.slice(0, 200),
+      responses: cleanResponses,
+      gradedMarks: Math.max(-200, Math.min(400, Math.round((entry.gradedMarks || 0) * 100) / 100)),
+      gradedMaxMarks: Math.max(0, Math.min(400, Math.round((entry.gradedMaxMarks || 0) * 100) / 100)),
+      totalMaxMarks: Math.max(0, Math.min(400, Math.round((entry.totalMaxMarks || 0) * 100) / 100)),
+      gradedCount: Math.max(0, Math.min(200, Math.round(entry.gradedCount || 0))),
+      gradedAttemptedCount: Math.max(0, Math.min(200, Math.round(entry.gradedAttemptedCount || 0))),
+      pendingKeyCount: Math.max(0, Math.min(200, Math.round(entry.pendingKeyCount || 0))),
+      correctCount: Math.max(0, Math.min(200, Math.round(entry.correctCount || 0))),
+      wrongCount: Math.max(0, Math.min(200, Math.round(entry.wrongCount || 0))),
+      unattemptedCount: Math.max(0, Math.min(200, Math.round(entry.unattemptedCount || 0))),
+      penaltyMarks: Math.max(0, Math.min(200, Math.round((entry.penaltyMarks || 0) * 100) / 100)),
+      accuracyPct: Math.max(0, Math.min(100, Math.round(entry.accuracyPct || 0))),
+    };
+
+    setState((prev) => {
+      const rest = prev.testHistory.filter((t) => t.id !== docId);
+      return {
+        ...prev,
+        testHistory: [cleanEntry, ...rest].sort((a, b) =>
+          b.completedAt.localeCompare(a.completedAt)
+        ),
+      };
+    });
+
+    const uid = userRef.current?.uid;
+    if (uid) {
+      const path = `users/${uid}/test_history/${docId}`;
+      setDoc(doc(db, 'users', uid, 'test_history', docId), {
+        ownerId: uid,
+        testId: docId,
+        title: cleanEntry.title,
+        mode: cleanEntry.mode,
+        date: cleanEntry.date,
+        completedAt: cleanEntry.completedAt,
+        durationSeconds: cleanEntry.durationSeconds,
+        questionIds: cleanEntry.questionIds,
+        responses: cleanEntry.responses,
+        gradedMarks: cleanEntry.gradedMarks,
+        gradedMaxMarks: cleanEntry.gradedMaxMarks,
+        totalMaxMarks: cleanEntry.totalMaxMarks,
+        gradedCount: cleanEntry.gradedCount,
+        gradedAttemptedCount: cleanEntry.gradedAttemptedCount,
+        pendingKeyCount: cleanEntry.pendingKeyCount,
+        correctCount: cleanEntry.correctCount,
+        wrongCount: cleanEntry.wrongCount,
+        unattemptedCount: cleanEntry.unattemptedCount,
+        penaltyMarks: cleanEntry.penaltyMarks,
+        accuracyPct: cleanEntry.accuracyPct,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }).catch((err) => handleFirestoreError(err, OperationType.CREATE, path));
+    }
+    return cleanEntry;
+  }, []);
+
+  const deleteTestHistoryEntry = useCallback((testId: string) => {
+    const docId = sanitizeDocId(testId);
+    setState((prev) => ({
+      ...prev,
+      testHistory: prev.testHistory.filter((t) => t.id !== docId && t.id !== testId),
+    }));
+
+    const uid = userRef.current?.uid;
+    if (uid) {
+      const path = `users/${uid}/test_history/${docId}`;
+      deleteDoc(doc(db, 'users', uid, 'test_history', docId)).catch((err) =>
+        handleFirestoreError(err, OperationType.DELETE, path)
+      );
+    }
+  }, []);
+
   const saveVerifiedAnswer = useCallback(
     async (record: Omit<VerifiedAnswerRecord, 'updatedAt'>): Promise<VerifiedAnswerRecord> => {
       const nowIso = new Date().toISOString();
@@ -2097,13 +2285,95 @@ export function useWarRoomStore() {
         updatedAt: nowIso,
       };
 
+      // Build updated question map so testHistory, attempts, mistakes, and daily tests recalculate immediately
+      const liveQuestionMap = new Map<string, Question>();
+      for (const q of allQuestions) {
+        liveQuestionMap.set(q.id, q.id === record.questionId ? applyVerifiedAnswer(q, saved) : q);
+      }
+
+      const prevState = stateRef.current;
+      const updatedQuestion = liveQuestionMap.get(record.questionId);
+
+      // Recalculate any test history entries containing this question
+      const changedHistoryIds: TestHistoryEntry[] = [];
+      const nextTestHistory = prevState.testHistory.map((entry) => {
+        if (!entry.questionIds.includes(record.questionId)) return entry;
+        const recalculated = recalculateTestHistoryEntry(entry, liveQuestionMap);
+        changedHistoryIds.push(recalculated);
+        return recalculated;
+      });
+
+      // Find the most recent response for this question (from testHistory or attempts) to sync attempts + mistakes
+      let latestRawResponse = prevState.attempts[record.questionId]?.selectedAnswer;
+      for (const entry of nextTestHistory) {
+        if (entry.responses && entry.responses[record.questionId]) {
+          latestRawResponse = entry.responses[record.questionId];
+          break;
+        }
+      }
+
+      // Also recalculate any daily DPP / GA record that includes this question and saved responses
+      let dailyChanged = false;
+      const recalcDailyMap = (map: Record<string, DailyTestRecord>) => {
+        const nextMap: Record<string, DailyTestRecord> = { ...map };
+        for (const [dateKey, rec] of Object.entries(map)) {
+          if (!rec.completedAt || !rec.questionIds.includes(record.questionId) || !rec.responses) {
+            continue;
+          }
+          const qs = rec.questionIds
+            .map((id) => liveQuestionMap.get(id))
+            .filter((q): q is Question => Boolean(q));
+          if (qs.length === 0) continue;
+          const parsedResponses: Record<string, ReturnType<typeof parseSerializedResponse>> = {};
+          for (const q of qs) {
+            parsedResponses[q.id] = parseSerializedResponse(q.format, rec.responses[q.id]);
+          }
+          const summary = gradeTestSessionStrict(qs, parsedResponses);
+          nextMap[dateKey] = {
+            ...rec,
+            score: summary.gradedMarks,
+            maxMarks: summary.totalMaxMarks,
+            gradedMaxMarks: summary.gradedMaxMarks,
+            pendingKeyCount: summary.pendingKeyCount,
+            accuracy: summary.accuracyPct,
+            attemptedCount: summary.gradedAttemptedCount + summary.pendingAttemptedCount,
+            correctCount: summary.correctCount,
+          };
+          dailyChanged = true;
+        }
+        return nextMap;
+      };
+
+      const nextDailyProgress: DailyProgressState = {
+        ...prevState.dailyProgress,
+        dailyDppByDate: recalcDailyMap(prevState.dailyProgress.dailyDppByDate),
+        dailyGaByDate: recalcDailyMap(prevState.dailyProgress.dailyGaByDate),
+      };
+
       setState((prev) => ({
         ...prev,
         verifiedAnswers: {
           ...prev.verifiedAnswers,
           [record.questionId]: saved,
         },
+        testHistory: nextTestHistory,
+        dailyProgress: dailyChanged ? nextDailyProgress : prev.dailyProgress,
       }));
+
+      // Re-evaluate attempt & Mistake Bucket immediately if the user already answered this question
+      if (updatedQuestion && latestRawResponse && latestRawResponse.trim() !== '') {
+        const parsedResp = parseSerializedResponse(updatedQuestion.format, latestRawResponse);
+        const evalRes = evaluateQuestionStrict(updatedQuestion, parsedResp);
+        if (evalRes.status === 'correct' || evalRes.status === 'wrong') {
+          recordQuestionAttempt(
+            updatedQuestion.id,
+            evalRes.status === 'correct',
+            evalRes.marksAwarded,
+            updatedQuestion.marks,
+            latestRawResponse
+          );
+        }
+      }
 
       const uid = userRef.current?.uid;
       if (uid) {
@@ -2129,11 +2399,36 @@ export function useWarRoomStore() {
         } catch (err) {
           handleFirestoreError(err, OperationType.WRITE, path);
         }
+
+        // Persist recalculated test_history entries to Firestore in real time
+        for (const updatedEntry of changedHistoryIds) {
+          const histDocId = sanitizeDocId(updatedEntry.id);
+          const histPath = `users/${uid}/test_history/${histDocId}`;
+          updateDoc(doc(db, 'users', uid, 'test_history', histDocId), {
+            responses: updatedEntry.responses,
+            gradedMarks: updatedEntry.gradedMarks,
+            gradedMaxMarks: updatedEntry.gradedMaxMarks,
+            totalMaxMarks: updatedEntry.totalMaxMarks,
+            gradedCount: updatedEntry.gradedCount,
+            gradedAttemptedCount: updatedEntry.gradedAttemptedCount,
+            pendingKeyCount: updatedEntry.pendingKeyCount,
+            correctCount: updatedEntry.correctCount,
+            wrongCount: updatedEntry.wrongCount,
+            unattemptedCount: updatedEntry.unattemptedCount,
+            penaltyMarks: updatedEntry.penaltyMarks,
+            accuracyPct: updatedEntry.accuracyPct,
+            updatedAt: serverTimestamp(),
+          }).catch((err) => handleFirestoreError(err, OperationType.UPDATE, histPath));
+        }
+
+        if (dailyChanged) {
+          void persistDailyProgress(nextDailyProgress);
+        }
       }
 
       return saved;
     },
-    []
+    [allQuestions, recordQuestionAttempt, persistDailyProgress]
   );
 
   const verifySinglePyqWithAi = useCallback(
@@ -2178,7 +2473,9 @@ export function useWarRoomStore() {
         };
 
         if (data.quotaExceeded) {
-          const msg = data.message || 'Daily free AI limit reached · Use GateOverflow or Self-Check';
+          const msg =
+            data.message ||
+            'Temporarily busy — try again in a moment, or enter the official key manually.';
           setQuotaNotice(msg);
           return { ok: false, quotaExceeded: true, message: msg };
         }
@@ -2210,12 +2507,12 @@ export function useWarRoomStore() {
           ok: true,
           verified: saved,
           modelUsed: data.modelUsed,
-          message: `Verified via ${data.modelUsed || 'Gemini Free Tier'} and cached permanently.`,
+          message: 'Answer key verified and saved permanently.',
         };
       } catch {
         return {
           ok: false,
-          message: 'Network error while verifying · Use GateOverflow Solution or Self-Check.',
+          message: 'Verification service unreachable right now — you can enter the key manually.',
         };
       }
     },
@@ -2715,7 +3012,7 @@ export function useWarRoomStore() {
           ok: true,
           addedCards: freshCards.length,
           duplicatesSkipped: skipped,
-          message: `Synced ${freshCards.length} new card(s) from GitHub${skipped > 0 ? ` (${skipped} duplicates skipped)` : ''} · ₹0 cost.`,
+          message: `Synced ${freshCards.length} new card(s) from GitHub${skipped > 0 ? ` (${skipped} duplicates skipped)` : ''}.`,
         };
       } catch {
         return {
@@ -2920,7 +3217,7 @@ export function useWarRoomStore() {
           const msg =
             mode === 'mistakes'
               ? `Mined ${newItems.length} personal trap card(s) from your Mistake Bucket.`
-              : `Added ${newItems.length} fresh GATE CSE traps (${data.modelUsed || 'Free Tier'}) to your permanent library.`;
+              : `Added ${newItems.length} fresh GATE CSE traps to your permanent library.`;
           setTrapsNotice(msg);
           return { ok: true, addedCount: newItems.length, message: msg };
         }
@@ -2989,42 +3286,41 @@ export function useWarRoomStore() {
     // Intentionally a zero-API no-op: Vault is powered by the 132-card Offline Master Bundle + JSON/GitHub Packs.
   }, []);
 
-  const addMockTest = useCallback((mock: Omit<MockTestEntry, 'id'>) => {
-    const newMock: MockTestEntry = {
-      ...mock,
-      id: `mock_${Date.now()}`,
-    };
-    setState((prev) => ({
-      ...prev,
-      mocks: [...prev.mocks, newMock].sort((a, b) => a.date.localeCompare(b.date)),
-    }));
-
-    const uid = userRef.current?.uid;
-    if (uid) {
-      const path = `users/${uid}/mocks/${newMock.id}`;
+  const buildSanitizedMockFields = useCallback(
+    (mock: Omit<MockTestEntry, 'id'>): Record<string, unknown> => {
       const validMockSubjects = new Set([
-        'all', 'ga', 'em', 'dl', 'coa', 'pds', 'algo', 'toc', 'cd', 'os', 'dbms', 'cn',
+        'all',
+        'ga',
+        'em',
+        'dl',
+        'coa',
+        'cprog',
+        'ds',
+        'algo',
+        'toc',
+        'cd',
+        'os',
+        'dbms',
+        'cn',
       ]);
       const validParseSources = new Set(['local_deterministic', 'ai_free_tier', 'manual']);
-      const safeDate = /^\d{4}-\d{2}-\d{2}$/.test(newMock.date) ? newMock.date : toLocalIsoDate();
-      const safeName = (newMock.name || 'Mock Test').trim().slice(0, 160);
-      const safeSource = (newMock.source || 'GATE Test Series').trim().slice(0, 120);
+      const safeDate = /^\d{4}-\d{2}-\d{2}$/.test(mock.date) ? mock.date : toLocalIsoDate();
+      const safeName = (mock.name || 'Mock Test').trim().slice(0, 160);
+      const safeSource = (mock.source || 'GATE Test Series').trim().slice(0, 120);
 
-      const payload: Record<string, unknown> = {
-        ownerId: uid,
+      const fields: Record<string, unknown> = {
         name: safeName.length >= 3 ? safeName : `${safeName} Mock`,
         source: safeSource.length >= 1 ? safeSource : 'GATE Test Series',
         date: safeDate,
         type:
-          newMock.type === 'Topic-Wise Test' || newMock.type === 'Subject Test'
-            ? newMock.type
+          mock.type === 'Topic-Wise Test' || mock.type === 'Subject Test'
+            ? mock.type
             : 'Full-Length Mock',
-        score: Math.max(-100, Math.min(300, Number(newMock.score))),
-        maxScore: Math.max(1, Math.min(300, Number(newMock.maxScore))),
-        accuracy: Math.max(0, Math.min(100, Number(newMock.accuracy))),
-        unattempted: Math.max(0, Math.min(300, Math.round(Number(newMock.unattempted ?? 0)))),
-        notes: (newMock.notes ?? '').slice(0, 2000),
-        createdAt: serverTimestamp(),
+        score: Math.max(-100, Math.min(300, Number(mock.score))),
+        maxScore: Math.max(1, Math.min(300, Number(mock.maxScore))),
+        accuracy: Math.max(0, Math.min(100, Number(mock.accuracy))),
+        unattempted: Math.max(0, Math.min(300, Math.round(Number(mock.unattempted ?? 0)))),
+        notes: (mock.notes ?? '').slice(0, 2000),
       };
 
       const addBounded = (
@@ -3037,55 +3333,109 @@ export function useWarRoomStore() {
         if (typeof val !== 'number' || !Number.isFinite(val)) return;
         const clamped = Math.max(min, Math.min(max, val));
         if (roundInt && Math.round(clamped) < min) return;
-        payload[key] = roundInt ? Math.round(clamped) : Math.round(clamped * 100) / 100;
+        fields[key] = roundInt ? Math.round(clamped) : Math.round(clamped * 100) / 100;
       };
 
-      if (newMock.subjectId && validMockSubjects.has(newMock.subjectId)) {
-        payload.subjectId = newMock.subjectId;
+      if (mock.subjectId && validMockSubjects.has(mock.subjectId)) {
+        fields.subjectId = mock.subjectId;
       }
-      if (newMock.parseSource && validParseSources.has(newMock.parseSource)) {
-        payload.parseSource = newMock.parseSource;
+      if (mock.parseSource && validParseSources.has(mock.parseSource)) {
+        fields.parseSource = mock.parseSource;
       }
 
-      addBounded('normalizedScore', newMock.normalizedScore, -100, 100);
-      addBounded('percentage', newMock.percentage, -100, 100);
-      addBounded('totalQuestions', newMock.totalQuestions, 0, 300, true);
-      addBounded('attempted', newMock.attempted, 0, 300, true);
-      addBounded('correct', newMock.correct, 0, 300, true);
-      addBounded('wrong', newMock.wrong, 0, 300, true);
-      addBounded('q1Attempted', newMock.q1Attempted, 0, 200, true);
-      addBounded('q2Attempted', newMock.q2Attempted, 0, 200, true);
-      addBounded('q1Correct', newMock.q1Correct, 0, 200, true);
-      addBounded('q2Correct', newMock.q2Correct, 0, 200, true);
-      addBounded('q1Wrong', newMock.q1Wrong, 0, 200, true);
-      addBounded('q2Wrong', newMock.q2Wrong, 0, 200, true);
-      addBounded('q1Total', newMock.q1Total, 0, 200, true);
-      addBounded('q2Total', newMock.q2Total, 0, 200, true);
-      addBounded('positiveMarks', newMock.positiveMarks, 0, 300);
-      addBounded('penaltyMarks', newMock.penaltyMarks, 0, 150);
-      addBounded('q1PositiveMarks', newMock.q1PositiveMarks, 0, 200);
-      addBounded('q2PositiveMarks', newMock.q2PositiveMarks, 0, 300);
-      addBounded('q1PenaltyMarks', newMock.q1PenaltyMarks, 0, 150);
-      addBounded('q2PenaltyMarks', newMock.q2PenaltyMarks, 0, 150);
-      addBounded('durationMinutes', newMock.durationMinutes, 0, 600);
-      addBounded('timeTakenMinutes', newMock.timeTakenMinutes, 0, 600);
-      if (typeof newMock.rank === 'number' && Number.isFinite(newMock.rank) && newMock.rank >= 1) {
-        addBounded('rank', newMock.rank, 1, 500000, true);
+      addBounded('normalizedScore', mock.normalizedScore, -100, 100);
+      addBounded('percentage', mock.percentage, -100, 100);
+      addBounded('totalQuestions', mock.totalQuestions, 0, 300, true);
+      addBounded('attempted', mock.attempted, 0, 300, true);
+      addBounded('correct', mock.correct, 0, 300, true);
+      addBounded('wrong', mock.wrong, 0, 300, true);
+      addBounded('q1Attempted', mock.q1Attempted, 0, 200, true);
+      addBounded('q2Attempted', mock.q2Attempted, 0, 200, true);
+      addBounded('q1Correct', mock.q1Correct, 0, 200, true);
+      addBounded('q2Correct', mock.q2Correct, 0, 200, true);
+      addBounded('q1Wrong', mock.q1Wrong, 0, 200, true);
+      addBounded('q2Wrong', mock.q2Wrong, 0, 200, true);
+      addBounded('q1Total', mock.q1Total, 0, 200, true);
+      addBounded('q2Total', mock.q2Total, 0, 200, true);
+      addBounded('positiveMarks', mock.positiveMarks, 0, 300);
+      addBounded('penaltyMarks', mock.penaltyMarks, 0, 150);
+      addBounded('q1PositiveMarks', mock.q1PositiveMarks, 0, 200);
+      addBounded('q2PositiveMarks', mock.q2PositiveMarks, 0, 300);
+      addBounded('q1PenaltyMarks', mock.q1PenaltyMarks, 0, 150);
+      addBounded('q2PenaltyMarks', mock.q2PenaltyMarks, 0, 150);
+      addBounded('durationMinutes', mock.durationMinutes, 0, 600);
+      addBounded('timeTakenMinutes', mock.timeTakenMinutes, 0, 600);
+      if (typeof mock.rank === 'number' && Number.isFinite(mock.rank) && mock.rank >= 1) {
+        addBounded('rank', mock.rank, 1, 500000, true);
       }
       if (
-        typeof newMock.totalCandidates === 'number' &&
-        Number.isFinite(newMock.totalCandidates) &&
-        newMock.totalCandidates >= 1
+        typeof mock.totalCandidates === 'number' &&
+        Number.isFinite(mock.totalCandidates) &&
+        mock.totalCandidates >= 1
       ) {
-        addBounded('totalCandidates', newMock.totalCandidates, 1, 500000, true);
+        addBounded('totalCandidates', mock.totalCandidates, 1, 500000, true);
       }
-      addBounded('percentile', newMock.percentile, 0, 100);
+      addBounded('percentile', mock.percentile, 0, 100);
+      return fields;
+    },
+    []
+  );
 
-      setDoc(doc(db, 'users', uid, 'mocks', newMock.id), payload).catch((err) =>
-        handleFirestoreError(err, OperationType.CREATE, path)
-      );
-    }
-  }, []);
+  const addMockTest = useCallback(
+    (mock: Omit<MockTestEntry, 'id'>) => {
+      const newMock: MockTestEntry = {
+        ...mock,
+        id: `mock_${Date.now()}`,
+      };
+      setState((prev) => ({
+        ...prev,
+        mocks: [...prev.mocks, newMock].sort((a, b) => a.date.localeCompare(b.date)),
+      }));
+
+      const uid = userRef.current?.uid;
+      if (uid) {
+        const path = `users/${uid}/mocks/${newMock.id}`;
+        const payload: Record<string, unknown> = {
+          ownerId: uid,
+          ...buildSanitizedMockFields(newMock),
+          createdAt: serverTimestamp(),
+        };
+        setDoc(doc(db, 'users', uid, 'mocks', newMock.id), payload).catch((err) =>
+          handleFirestoreError(err, OperationType.CREATE, path)
+        );
+      }
+    },
+    [buildSanitizedMockFields]
+  );
+
+  const updateMockTest = useCallback(
+    (mockId: string, mock: Omit<MockTestEntry, 'id'>) => {
+      const updatedMock: MockTestEntry = {
+        ...mock,
+        id: mockId,
+      };
+      setState((prev) => ({
+        ...prev,
+        mocks: prev.mocks
+          .map((m) => (m.id === mockId ? updatedMock : m))
+          .sort((a, b) => a.date.localeCompare(b.date)),
+      }));
+
+      const uid = userRef.current?.uid;
+      if (uid) {
+        const docId = sanitizeDocId(mockId);
+        const path = `users/${uid}/mocks/${docId}`;
+        const updatePayload: Record<string, unknown> = {
+          ...buildSanitizedMockFields(updatedMock),
+          updatedAt: serverTimestamp(),
+        };
+        updateDoc(doc(db, 'users', uid, 'mocks', docId), updatePayload).catch((err) =>
+          handleFirestoreError(err, OperationType.UPDATE, path)
+        );
+      }
+    },
+    [buildSanitizedMockFields]
+  );
 
   const deleteMockTest = useCallback((mockId: string) => {
     setState((prev) => ({
@@ -3244,12 +3594,13 @@ export function useWarRoomStore() {
   const importFullBackup = useCallback(
     (imported: Partial<WarRoomState>) => {
       const initial = createInitialWarRoomState();
-      const merged: WarRoomState = {
+      const merged: WarRoomState = migrateLegacyWarRoomState({
         ...initial,
         ...imported,
         settings: { ...initial.settings, ...(imported.settings ?? {}) },
         progress: { ...initial.progress, ...(imported.progress ?? {}) },
-      };
+        testHistory: Array.isArray(imported.testHistory) ? imported.testHistory : [],
+      });
       setState(merged);
 
       const uid = userRef.current?.uid;
@@ -3317,6 +3668,9 @@ export function useWarRoomStore() {
       for (const pack of stateRef.current.vaultPacks) {
         batch.delete(doc(db, 'users', uid, 'vault_packs', sanitizeDocId(pack.packId)));
       }
+      for (const hist of stateRef.current.testHistory) {
+        batch.delete(doc(db, 'users', uid, 'test_history', sanitizeDocId(hist.id)));
+      }
       await batch.commit();
     } catch (err) {
       console.error('Error resetting Firestore collections:', err);
@@ -3342,7 +3696,7 @@ export function useWarRoomStore() {
       }
 
       setAutopilotLoading(true);
-      setAutopilotStatusMsg('Syncing daily PYQ batch via Free-Tier Search Grounding...');
+      setAutopilotStatusMsg('Syncing daily PYQ batch...');
 
       try {
         const resp = await fetch('/api/daily-autopilot', {
@@ -3361,7 +3715,8 @@ export function useWarRoomStore() {
         };
 
         if (data.quotaExceeded) {
-          const msg = data.message || 'Daily free fetch limit reached · Using cached DB';
+          const msg =
+            data.message || 'Temporarily busy — try again in a moment. Using your saved question bank.';
           setQuotaNotice(msg);
           setAutopilotStatusMsg(msg);
           return { ok: false, addedQuestions: 0, addedTip: false, quotaExceeded: true, message: msg };
@@ -3455,7 +3810,8 @@ export function useWarRoomStore() {
         };
 
         if (data.quotaExceeded) {
-          const msg = data.message || 'Daily free fetch limit reached · Using cached DB';
+          const msg =
+            data.message || 'Temporarily busy — try again in a moment. Using your saved question bank.';
           setQuotaNotice(msg);
           return { ok: false, addedCount: 0, quotaExceeded: true, message: msg };
         }
@@ -3513,7 +3869,8 @@ export function useWarRoomStore() {
         };
 
         if (data.quotaExceeded) {
-          const msg = data.message || 'Daily free fetch limit reached · Using cached DB';
+          const msg =
+            data.message || 'Temporarily busy — try again in a moment. Using your saved question bank.';
           setQuotaNotice(msg);
           return { ok: false, addedCount: 0, quotaExceeded: true, message: msg };
         }
@@ -3605,6 +3962,8 @@ export function useWarRoomStore() {
     updateStudyLog,
     deleteStudyLog,
     recordQuestionAttempt,
+    recordTestHistoryEntry,
+    deleteTestHistoryEntry,
     toggleQuestionBookmark,
     updateMistakeTag,
     updateMistakeNote,
@@ -3624,6 +3983,7 @@ export function useWarRoomStore() {
     deleteVaultCard,
     syncVaultFromGithub,
     addMockTest,
+    updateMockTest,
     deleteMockTest,
     updateSettings,
     importFullBackup,

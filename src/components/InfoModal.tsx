@@ -55,7 +55,7 @@ export const InfoModal: React.FC<InfoModalProps> = ({ open, onClose }) => {
               HTML5 rough-work sketchpad, virtual scientific calculator, and ROI mock analytics.
             </p>
             <p className="mt-3 text-xs font-semibold text-[#6E261A] dark:text-[#E0A92E]">
-              Built by Nihal Pawar · Real-Time Cloud Firestore + Local-First Persistence
+              Built by Nihal Pawar · Real-Time Cloud Sync &amp; Offline-First Study Workspace
             </p>
           </div>
 

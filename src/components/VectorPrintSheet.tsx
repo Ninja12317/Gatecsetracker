@@ -17,6 +17,7 @@ import {
   toLocalIsoDate,
 } from '../utils/gateMath';
 import { formatPaceDuration, isSlowPaceQuestion } from '../utils/examPolish';
+import { hasGateOverflowUrl } from '../utils/subjectMigration';
 
 function formatStudyMinutes(totalMins: number): string {
   const hrs = Math.floor(totalMins / 60);
@@ -40,16 +41,16 @@ interface VectorPrintSheetProps {
 }
 
 function getOfficialAnswerText(q: Question): string {
-  if (q.format === 'MCQ') return q.correctOption || 'Verify on GateOverflow';
+  if (q.format === 'MCQ') return q.correctOption || 'Pending Answer Key';
   if (q.format === 'MSQ') {
     return q.correctOptions && q.correctOptions.length > 0
       ? q.correctOptions.join(', ')
-      : 'Verify on GateOverflow';
+      : 'Pending Answer Key';
   }
   if (typeof q.natAnswer === 'number') {
     return `${q.natAnswer}${q.natTolerance ? ` (±${q.natTolerance})` : ''}${q.natUnit ? ` ${q.natUnit}` : ''}`;
   }
-  return 'Verify on GateOverflow';
+  return 'Pending Answer Key';
 }
 
 export const VectorPrintSheet: React.FC<VectorPrintSheetProps> = ({ job, state }) => {
@@ -288,7 +289,7 @@ export const VectorPrintSheet: React.FC<VectorPrintSheetProps> = ({ job, state }
 
           {includeSketch && renderTraceTable(singleTraceTable)}
 
-          {includeSourceLink && q.sourceUrl && (
+          {includeSourceLink && hasGateOverflowUrl(q) && (
             <div style={{ marginTop: '8pt', fontSize: '8.5pt', color: '#61554D' }}>
               GateOverflow Reference:{' '}
               <a href={q.sourceUrl}>{q.sourceUrl}</a>
@@ -452,7 +453,7 @@ export const VectorPrintSheet: React.FC<VectorPrintSheetProps> = ({ job, state }
                     </div>
                   )}
                   {includeSketch && renderTraceTable(traceTable)}
-                  {includeSourceLink && q.sourceUrl && (
+                  {includeSourceLink && hasGateOverflowUrl(q) && (
                     <div style={{ marginTop: '4pt', fontSize: '8pt', color: '#61554D' }}>
                       Source: <a href={q.sourceUrl}>{q.sourceUrl}</a>
                     </div>
@@ -679,7 +680,7 @@ export const VectorPrintSheet: React.FC<VectorPrintSheetProps> = ({ job, state }
 
       <section style={{ marginBottom: '14pt' }}>
         <h2 style={{ fontSize: '11.5pt', fontWeight: 700, color: '#6E261A', marginBottom: '6pt' }}>
-          Subject Mastery Breakdown (11 GATE CSE Subjects)
+          Subject Mastery Breakdown (12 GATE CSE Subjects)
         </h2>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9pt' }}>
           <thead>

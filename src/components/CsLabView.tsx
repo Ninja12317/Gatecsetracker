@@ -249,7 +249,7 @@ export const CsLabView: React.FC<CsLabViewProps> = ({
               Visualizers, Hide-and-Recall Matrices &amp; Dry-Run Sandbox
             </h1>
             <p className="mt-1 text-xs sm:text-sm text-[#61554D] dark:text-[#A99B8E]">
-              100% offline-first exam tools aligned strictly to the GATE CSE 2027 syllabus — zero external compilers, zero billing.
+              Interactive exam workbenches aligned strictly to the GATE CSE 2027 syllabus with built-in execution and visualizers.
             </p>
           </div>
         </div>

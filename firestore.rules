@@ -38,11 +38,11 @@ service cloud.firestore {
     }
 
     function isValidSubjectId(subjectId) {
-      return subjectId is string && subjectId in ['ga', 'em', 'dl', 'coa', 'pds', 'algo', 'toc', 'cd', 'os', 'dbms', 'cn'];
+      return subjectId is string && subjectId in ['ga', 'em', 'dl', 'coa', 'cprog', 'ds', 'algo', 'toc', 'cd', 'os', 'dbms', 'cn'];
     }
 
     function isValidMockSubjectId(subjectId) {
-      return subjectId is string && subjectId in ['all', 'ga', 'em', 'dl', 'coa', 'pds', 'algo', 'toc', 'cd', 'os', 'dbms', 'cn'];
+      return subjectId is string && subjectId in ['all', 'ga', 'em', 'dl', 'coa', 'cprog', 'ds', 'algo', 'toc', 'cd', 'os', 'dbms', 'cn'];
     }
 
     function isValidStringList(arr, maxLen) {
@@ -207,7 +207,7 @@ service cloud.firestore {
           'q1Attempted', 'q2Attempted', 'q1Correct', 'q2Correct', 'q1Wrong', 'q2Wrong', 'q1Total', 'q2Total',
           'positiveMarks', 'penaltyMarks', 'q1PositiveMarks', 'q2PositiveMarks', 'q1PenaltyMarks', 'q2PenaltyMarks',
           'durationMinutes', 'timeTakenMinutes', 'rank', 'totalCandidates', 'percentile', 'parseSource',
-          'notes', 'createdAt'
+          'notes', 'createdAt', 'updatedAt'
         ])
         && data.ownerId == request.auth.uid
         && data.ownerId == userId
@@ -247,7 +247,8 @@ service cloud.firestore {
         && isOptionalBoundedNumber(data, 'percentile', 0, 100)
         && (!('parseSource' in data) || data.parseSource in ['local_deterministic', 'ai_free_tier', 'manual'])
         && data.notes is string && data.notes.size() <= 2000
-        && data.createdAt is timestamp;
+        && data.createdAt is timestamp
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
     function isValidCustomTip(data, userId) {
@@ -465,6 +466,45 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidTestHistory(data, userId, testId) {
+      return data.keys().hasAll([
+          'ownerId', 'testId', 'title', 'mode', 'date', 'completedAt', 'durationSeconds',
+          'questionIds', 'responses', 'gradedMarks', 'gradedMaxMarks', 'totalMaxMarks',
+          'gradedCount', 'gradedAttemptedCount', 'pendingKeyCount', 'correctCount',
+          'wrongCount', 'unattemptedCount', 'penaltyMarks', 'accuracyPct', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'testId', 'title', 'mode', 'date', 'completedAt', 'durationSeconds',
+          'questionIds', 'responses', 'gradedMarks', 'gradedMaxMarks', 'totalMaxMarks',
+          'gradedCount', 'gradedAttemptedCount', 'pendingKeyCount', 'correctCount',
+          'wrongCount', 'unattemptedCount', 'penaltyMarks', 'accuracyPct', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && data.testId == testId
+        && isValidId(data.testId)
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 180
+        && data.mode in ['timed', 'practice', 'daily_dpp', 'daily_ga', 'concept_drill']
+        && data.date is string && data.date.size() == 10 && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.completedAt is string && data.completedAt.size() >= 10 && data.completedAt.size() <= 40
+        && data.durationSeconds is number && data.durationSeconds >= 0 && data.durationSeconds <= 86400
+        && isValidStringList(data.questionIds, 200)
+        && data.responses is map && data.responses.size() <= 200
+        && data.gradedMarks is number && data.gradedMarks >= -200 && data.gradedMarks <= 400
+        && data.gradedMaxMarks is number && data.gradedMaxMarks >= 0 && data.gradedMaxMarks <= 400
+        && data.totalMaxMarks is number && data.totalMaxMarks >= 0 && data.totalMaxMarks <= 400
+        && data.gradedCount is number && data.gradedCount >= 0 && data.gradedCount <= 200
+        && data.gradedAttemptedCount is number && data.gradedAttemptedCount >= 0 && data.gradedAttemptedCount <= 200
+        && data.pendingKeyCount is number && data.pendingKeyCount >= 0 && data.pendingKeyCount <= 200
+        && data.correctCount is number && data.correctCount >= 0 && data.correctCount <= 200
+        && data.wrongCount is number && data.wrongCount >= 0 && data.wrongCount <= 200
+        && data.unattemptedCount is number && data.unattemptedCount >= 0 && data.unattemptedCount <= 200
+        && data.penaltyMarks is number && data.penaltyMarks >= 0 && data.penaltyMarks <= 200
+        && data.accuracyPct is number && data.accuracyPct >= 0 && data.accuracyPct <= 100
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // ==================== COLLECTION MATCH RULES ====================
 
     match /users/{userId} {
@@ -648,8 +688,25 @@ service cloud.firestore {
           && isValidId(mockId)
           && isValidMockTest(incoming(), userId)
           && incoming().createdAt == request.time
+          && (!('updatedAt' in incoming()) || incoming().updatedAt == request.time)
           && parentUserExists(userId);
-        allow update: if false;
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(mockId)
+          && isValidMockTest(incoming(), userId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'source', 'subjectId', 'date', 'type',
+            'score', 'maxScore', 'normalizedScore', 'percentage', 'accuracy',
+            'totalQuestions', 'attempted', 'correct', 'wrong', 'unattempted',
+            'q1Attempted', 'q2Attempted', 'q1Correct', 'q2Correct', 'q1Wrong', 'q2Wrong', 'q1Total', 'q2Total',
+            'positiveMarks', 'penaltyMarks', 'q1PositiveMarks', 'q2PositiveMarks', 'q1PenaltyMarks', 'q2PenaltyMarks',
+            'durationMinutes', 'timeTakenMinutes', 'rank', 'totalCandidates', 'percentile', 'parseSource',
+            'notes', 'updatedAt'
+          ]);
         allow delete: if isVerified() && isOwner(userId) && isValidId(mockId);
       }
 
@@ -855,6 +912,33 @@ service cloud.firestore {
             'activeSheetId', 'sheets', 'updatedAt'
           ]);
         allow delete: if isVerified() && isOwner(userId) && isValidId(docId);
+      }
+
+      match /test_history/{testId} {
+        allow get: if isVerified() && isOwner(userId) && isValidId(testId);
+        allow list: if isVerified() && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isVerified()
+          && isOwner(userId)
+          && isValidId(testId)
+          && isValidTestHistory(incoming(), userId, testId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId);
+        allow update: if isVerified()
+          && isOwner(userId)
+          && isValidId(testId)
+          && isValidTestHistory(incoming(), userId, testId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().testId == existing().testId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && parentUserExists(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'responses', 'gradedMarks', 'gradedMaxMarks', 'totalMaxMarks',
+            'gradedCount', 'gradedAttemptedCount', 'pendingKeyCount', 'correctCount',
+            'wrongCount', 'unattemptedCount', 'penaltyMarks', 'accuracyPct', 'updatedAt'
+          ]);
+        allow delete: if isVerified() && isOwner(userId) && isValidId(testId);
       }
     }
   }

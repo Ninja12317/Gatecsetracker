@@ -114,12 +114,14 @@ export const LiveCountdownTile: React.FC<LiveCountdownTileProps> = React.memo(
             aria-valuemin={0}
             aria-valuemax={100}
           >
-            <div
-              className="h-full w-full origin-left rounded-full bg-[#E0A92E] transition-transform duration-300 ease-apple"
-              style={{
-                transform: `scaleX(${Math.max(0.03, sprintPhase.sprintProgressPct / 100)})`,
-              }}
-            />
+            {sprintPhase.sprintProgressPct > 0 && (
+              <div
+                className="h-full w-full origin-left rounded-full bg-[#E0A92E] transition-transform duration-300 ease-apple"
+                style={{
+                  transform: `scaleX(${sprintPhase.sprintProgressPct / 100})`,
+                }}
+              />
+            )}
           </div>
         </div>
       </div>

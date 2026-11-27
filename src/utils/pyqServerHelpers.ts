@@ -7,12 +7,15 @@ import type {
   TipItem,
 } from '../types';
 
+import { normalizeSubject12 } from './subjectMigration.ts';
+
 export const VALID_SUBJECT_IDS: readonly SubjectId[] = [
   'ga',
   'em',
   'dl',
   'coa',
-  'pds',
+  'cprog',
+  'ds',
   'algo',
   'toc',
   'cd',
@@ -233,10 +236,17 @@ function clampString(val: unknown, maxLen: number): string {
   return val.trim().slice(0, maxLen);
 }
 
-function normalizeSubjectId(val: unknown, fallback: SubjectId = 'algo'): SubjectId {
+function normalizeSubjectId(
+  val: unknown,
+  fallback: SubjectId = 'algo',
+  context?: { subtopic?: string; title?: string; text?: string }
+): SubjectId {
   if (typeof val === 'string') {
-    const lower = val.trim().toLowerCase() as SubjectId;
-    if (VALID_SUBJECT_IDS.includes(lower)) return lower;
+    const lower = val.trim().toLowerCase();
+    if (VALID_SUBJECT_IDS.includes(lower as SubjectId)) return lower as SubjectId;
+    if (lower === 'pds' || lower.includes('programming') || lower.includes('data structure')) {
+      return normalizeSubject12(lower, context, fallback);
+    }
   }
   return fallback;
 }
@@ -320,7 +330,10 @@ export function sanitizeFetchedQuestions(
 
     const format = normalizeFormat(item.format);
     const marks: 1 | 2 = Number(item.marks) === 1 ? 1 : 2;
-    const subjectId = normalizeSubjectId(item.subjectId, options?.defaultSubjectId ?? 'algo');
+    const subjectId = normalizeSubjectId(item.subjectId, options?.defaultSubjectId ?? 'algo', {
+      subtopic: clampString(item.subtopic, 150),
+      text: prompt,
+    });
     const subtopic = clampString(item.subtopic, 150) || 'Core Concepts';
     const difficulty = normalizeDifficulty(item.difficulty);
     const sourceTag = clampString(item.sourceTag, 110) || 'GATE PYQ · Web Grounded';
@@ -406,7 +419,7 @@ export function sanitizeFetchedTip(
   const detail = clampString(item.detail, 2800);
   if (title.length < 4 || detail.length < 10) return null;
 
-  const subjectId = normalizeSubjectId(item.subjectId, 'algo');
+  const subjectId = normalizeSubjectId(item.subjectId, 'algo', { title, text: detail });
   const rawCat = clampString(item.category, 30);
   const validCategories: TipItem['category'][] = ['Exam Trap', 'Formula', 'Shortcut', 'Edge Case'];
   const category = validCategories.includes(rawCat as TipItem['category'])

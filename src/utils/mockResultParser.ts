@@ -89,9 +89,14 @@ const SUBJECT_PATTERNS: Array<{ id: SubjectId; regex: RegExp }> = [
       /\b(computer\s*organization|architecture|coa|pipeline|pipelining|cache|memory\s*hierarchy|addressing\s*modes|alu)\b/i,
   },
   {
-    id: 'pds',
+    id: 'cprog',
     regex:
-      /\b(programming\s*(?:&|and)?\s*data\s*structures?|data\s*structures?|c\s*programming|linked\s*list|binary\s*tree|bst|avl|heap|stack|queue|pds|ds)\b/i,
+      /\b(c\s*programming|programming\s*in\s*c|cprog|pointers?|recursion|storage\s*class(?:es)?|macros?)\b/i,
+  },
+  {
+    id: 'ds',
+    regex:
+      /\b(data\s*structures?|programming\s*(?:&|and)?\s*data\s*structures?|linked\s*list|binary\s*tree|bst|avl|heap|stack|queue|pds|ds)\b/i,
   },
   {
     id: 'algo',

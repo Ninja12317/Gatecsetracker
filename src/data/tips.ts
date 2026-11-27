@@ -3,7 +3,7 @@ import type { TipItem } from '../types';
 export const GATE_TIPS: TipItem[] = [
   {
     id: 'tip-pds-ub',
-    subjectId: 'pds',
+    subjectId: 'cprog',
     title: 'C Sequence Point & Undefined Behavior Trap',
     category: 'Exam Trap',
     summary: 'Never assume left-to-right argument evaluation or multiple mutations between sequence points.',
@@ -174,7 +174,7 @@ export const GATE_TIPS: TipItem[] = [
   },
   {
     id: 'tip-pds-bst',
-    subjectId: 'pds',
+    subjectId: 'ds',
     title: 'Unique Binary Tree Reconstruction & Catalan Count',
     category: 'Formula',
     summary: 'Inorder + Preorder (or Inorder + Postorder) uniquely determines a binary tree; Preorder + Postorder does NOT (unless full binary tree).',

@@ -19,6 +19,7 @@ import {
 import { formatPaceDuration, isSlowPaceQuestion } from './examPolish';
 import { computeMockDiagnostics, getNormalizedMockPct } from './mockResultParser';
 import { formatMathToPlainUnicode } from './mathFormat';
+import { hasGateOverflowUrl } from './subjectMigration';
 
 export interface PdfExportJob {
   request: PdfExportRequest;
@@ -180,16 +181,16 @@ export function sanitizePdfFilename(prefix: string, isoDate?: string): string {
 }
 
 export function getOfficialAnswerSummary(q: Question): string {
-  if (q.format === 'MCQ') return q.correctOption || 'Verify on GateOverflow';
+  if (q.format === 'MCQ') return q.correctOption || 'Pending Answer Key';
   if (q.format === 'MSQ') {
     return q.correctOptions && q.correctOptions.length > 0
       ? q.correctOptions.join(', ')
-      : 'Verify on GateOverflow';
+      : 'Pending Answer Key';
   }
   if (typeof q.natAnswer === 'number') {
     return `${q.natAnswer}${q.natTolerance ? ` (+/-${q.natTolerance})` : ''}${q.natUnit ? ` ${q.natUnit}` : ''}`;
   }
-  return 'Verify on GateOverflow';
+  return 'Pending Answer Key';
 }
 
 function formatStudyMins(totalMins: number): string {
@@ -571,13 +572,13 @@ function renderQuestionBlock(
         y + 20) + 4;
   }
 
-  // Optional GateOverflow Source Link
-  if (opts.includeSourceLink && q.sourceUrl) {
+  // Optional GateOverflow Source Link (strictly only for verified gateoverflow.in URLs)
+  if (opts.includeSourceLink && hasGateOverflowUrl(q) && q.sourceUrl) {
     y = ensureSpace(doc, y, 7);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.8);
     doc.setTextColor(...MUTED);
-    doc.text(`Source: ${q.sourceUrl.slice(0, 110)}`, margin + 1, y);
+    doc.text(`Reference: ${q.sourceUrl.slice(0, 110)}`, margin + 1, y);
     y += 5;
   }
 
@@ -886,11 +887,11 @@ export function buildPdfDocument(
     });
     y += 24;
 
-    // 11-Subject Mastery Table
+    // 12-Subject Mastery Table
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10.5);
     doc.setTextColor(...MAROON);
-    doc.text('11 GATE CSE Subjects — Weighted Readiness Breakdown', margin, y);
+    doc.text('12 GATE CSE Subjects — Weighted Readiness Breakdown', margin, y);
     y += 4;
 
     const subjectRows = GATE_2027_SYLLABUS.map((subj) => {
@@ -1068,7 +1069,7 @@ export function buildVaultCheatSheetPdf(
     return { doc, filename, pageCount };
   }
 
-  // Group cards cleanly by official 11-subject order
+  // Group cards cleanly by official 12-subject order
   const subjectOrder = GATE_2027_SYLLABUS.map((s) => s.id);
   const grouped = new Map<string, VaultCard[]>();
   for (const sid of subjectOrder) {

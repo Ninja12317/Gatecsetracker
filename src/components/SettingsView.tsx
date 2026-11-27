@@ -236,7 +236,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               Settings Control Center
             </h1>
             <p className="text-xs sm:text-sm text-[#61554D] dark:text-[#A99B8E] mt-0.5">
-              Personalize your GATE 2027 countdown, typography scale, Pomodoro blocks, and offline cache. Synced automatically to Firestore.
+              Personalize your GATE 2027 countdown, display scale, Pomodoro blocks, and offline question bank. Synced automatically across your devices.
             </p>
           </div>
           {savedNotice && (
@@ -374,7 +374,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="flex items-center gap-2.5">
                 <Cloud className="h-4 w-4 text-[#6E261A] dark:text-[#E0A92E]" />
                 <h2 className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8]">
-                  Firebase Firestore Cloud Sync
+                  Cloud Account Sync
                 </h2>
               </div>
               <span
@@ -912,14 +912,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-display text-base font-bold text-[#1C1613] dark:text-[#F5F0E8]">
-                  GateR GitHub PYQ Bank &amp; IndexedDB Cache
+                  Offline PYQ Bank &amp; Local Cache
                 </h2>
                 <p className="text-xs text-[#61554D] dark:text-[#A99B8E] mt-0.5">
-                  Cached locally in browser IndexedDB (
-                  <code className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[#FAF8F4] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#352A24]">
-                    gate27_pyq_cache
-                  </code>
-                  ) for &lt;100ms offline access with zero Firestore quota burn.
+                  Cached locally on your device for instant offline practice and zero-latency filtering.
                 </p>
               </div>
               <button
@@ -929,7 +925,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 className="inline-flex items-center gap-2 h-10 px-4 rounded-full bg-[#6E261A] hover:bg-[#571C13] dark:bg-[#9E3E2E] text-white text-xs font-semibold disabled:opacity-60 press-tactile"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${gaterSyncStatus === 'syncing' ? 'animate-spin' : ''}`} />
-                Re-Sync GateR GitHub PYQs
+                Refresh Question Bank
               </button>
             </div>
 
@@ -944,7 +940,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
               <div className="rounded-[18px] bg-[#FAF8F4] dark:bg-[#241D19] border border-[#E8E0D5] dark:border-[#2E2520] p-3.5">
                 <p className="text-[10px] uppercase tracking-wider text-[#61554D] dark:text-[#A99B8E]">
-                  IndexedDB Cache Size
+                  Local Cache Size
                 </p>
                 <p className="font-mono text-lg font-bold text-[#6E261A] dark:text-[#E0A92E] tabular-nums">
                   {formatBytesCompact(cacheInfo.bytes)}
